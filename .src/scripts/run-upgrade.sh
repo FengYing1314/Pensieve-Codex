@@ -51,10 +51,31 @@ PROJECT_ROOT="$(to_posix_path "$PROJECT_ROOT")"
 validate_project_root "$PROJECT_ROOT"
 INSTALLED_ROOT="$(skill_root_from_script "$SCRIPT_DIR")"
 
+IS_CODEX_SNAPSHOT=0
+if client_includes "$CLIENT" codex; then
+  case "${INSTALLED_ROOT//\\//}" in
+    */.codex/plugins/cache/*) IS_CODEX_SNAPSHOT=1 ;;
+  esac
+  if [[ -n "${PLUGIN_ROOT:-}" && "$(to_posix_path "$PLUGIN_ROOT")" == "$INSTALLED_ROOT" ]]; then
+    IS_CODEX_SNAPSHOT=1
+  fi
+fi
+
+if [[ "$IS_CODEX_SNAPSHOT" -eq 1 && -z "$SOURCE_ROOT" ]]; then
+  echo "Installed Codex plugin snapshots are not updated in place." >&2
+  echo "Pass --source-root <clean-git-checkout>, then reinstall the plugin from its marketplace." >&2
+  exit 1
+fi
+
 if [[ -n "$SOURCE_ROOT" ]]; then
   UPDATE_ROOT="$(to_posix_path "$SOURCE_ROOT")"
 else
   UPDATE_ROOT="$INSTALLED_ROOT"
+fi
+
+if [[ "$IS_CODEX_SNAPSHOT" -eq 1 && "$UPDATE_ROOT" == "$INSTALLED_ROOT" ]]; then
+  echo "Refusing to treat the installed Codex snapshot as its update source." >&2
+  exit 1
 fi
 
 if ! git -C "$UPDATE_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -106,7 +127,7 @@ SUMMARY_JSON="$(resolve_output_path "$SUMMARY_JSON" "$STATE_DIR/pensieve-upgrade
 
 ensure_python_env
 [[ -n "${PYTHON_BIN:-}" ]] || { echo "Python not found" >&2; exit 1; }
-"$PYTHON_BIN" - "$REPORT" "$SUMMARY_JSON" "$PRE_VERSION" "$POST_VERSION" "$UPDATE_STRATEGY" "$UPDATE_ROOT" "$INSTALLED_ROOT" "$CLIENT" <<'PY'
+"$PYTHON_BIN" - "$REPORT" "$SUMMARY_JSON" "$PRE_VERSION" "$POST_VERSION" "$UPDATE_STRATEGY" "$UPDATE_ROOT" "$INSTALLED_ROOT" "$CLIENT" "$IS_CODEX_SNAPSHOT" <<'PY'
 from __future__ import annotations
 
 import json
@@ -117,10 +138,11 @@ report_file = Path(sys.argv[1])
 summary_file = Path(sys.argv[2])
 pre_version, post_version, strategy = sys.argv[3:6]
 update_root, installed_root, client = sys.argv[6:9]
+is_codex_snapshot = sys.argv[9] == "1"
 sys.path.insert(0, str(Path(installed_root) / ".src" / "core"))
 from hook_runtime import write_json_atomic_if_changed, write_text_atomic_if_changed
 
-reinstall_required = client in {"codex", "both"} and Path(update_root).resolve() != Path(installed_root).resolve()
+reinstall_required = is_codex_snapshot
 summary = {
     "status": "DONE",
     "client": client,
@@ -166,7 +188,7 @@ echo "  - client: $CLIENT"
 echo "  - pre_version: $PRE_VERSION"
 echo "  - post_version: $POST_VERSION"
 echo "  - strategy: $UPDATE_STRATEGY"
-if [[ "$CLIENT" == "codex" && "$UPDATE_ROOT" != "$INSTALLED_ROOT" ]]; then
+if [[ "$IS_CODEX_SNAPSHOT" -eq 1 ]]; then
   echo "  - next: reinstall the Codex plugin from its configured marketplace"
 else
   echo "  - next: run doctor"

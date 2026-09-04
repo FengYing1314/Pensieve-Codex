@@ -522,6 +522,39 @@ class UpgradeSafetyTests(PensieveTestCase):
         self.assertIn("dirty", result.stderr.lower())
         self.assertFalse((self.project / ".pensieve").exists())
 
+    def test_git_backed_codex_cache_is_still_an_immutable_snapshot(self) -> None:
+        installed = self.case_root / ".codex" / "plugins" / "cache" / "personal" / "pensieve" / "1.4.0"
+        for relative in (
+            ".src/scripts/run-upgrade.sh",
+            ".src/scripts/lib.sh",
+            ".src/core/hook_runtime.py",
+            ".src/manifest.json",
+        ):
+            destination = installed / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(REPO_ROOT / relative), str(destination))
+        self.git(installed, "init", "-b", "main")
+        self.git(installed, "config", "user.name", "Pensieve Tests")
+        self.git(installed, "config", "user.email", "pensieve-tests@example.invalid")
+        self.git(installed, "add", ".")
+        self.git(installed, "commit", "-m", "snapshot")
+
+        environment = self.env()
+        environment["PENSIEVE_SKILL_ROOT"] = str(installed)
+        environment["PLUGIN_ROOT"] = str(installed)
+        result = subprocess.run(
+            ["bash", str(installed / ".src" / "scripts" / "run-upgrade.sh"), "--client", "codex"],
+            cwd=str(self.project),
+            env=environment,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not updated in place", result.stderr)
+        self.assertFalse((self.project / ".pensieve").exists())
+
     def test_non_fast_forward_never_resets_checkout(self) -> None:
         remote = self.case_root / "remote.git"
         seed = self.case_root / "seed"
