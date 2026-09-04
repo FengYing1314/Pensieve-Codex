@@ -1,0 +1,14 @@
+{
+  "session_id": "claude-session",
+  "cwd": "__PROJECT__",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "MultiEdit",
+  "tool_input": {
+    "edits": [
+      {"file_path": "__PROJECT__/.pensieve/maxims/stable-api.md"},
+      {"file_path": "__PROJECT__/.pensieve/knowledge/payments/content.md"},
+      {"file_path": "__PROJECT__/.pensieve/short-term/decisions/retry-policy.md"}
+    ]
+  },
+  "tool_response": {"success": true}
+}

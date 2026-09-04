@@ -1,0 +1,7 @@
+{
+  "session_id": "codex-session",
+  "cwd": "__PROJECT__",
+  "hook_event_name": "SessionStart",
+  "source": "startup",
+  "model": "test-model"
+}

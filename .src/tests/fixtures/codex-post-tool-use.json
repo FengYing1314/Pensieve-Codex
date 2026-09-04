@@ -1,0 +1,10 @@
+{
+  "session_id": "codex-session",
+  "cwd": "__PROJECT__",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "apply_patch",
+  "tool_input": {
+    "command": "*** Begin Patch\n*** Update File: .pensieve/maxims/stable-api.md\n@@\n-old\n+new\n*** Add File: .pensieve/knowledge/payments/content.md\n+content\n*** Delete File: .pensieve/short-term/decisions/retry-policy.md\n*** End Patch"
+  },
+  "tool_response": {"success": true}
+}

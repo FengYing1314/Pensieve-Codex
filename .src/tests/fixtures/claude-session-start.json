@@ -1,0 +1,6 @@
+{
+  "session_id": "claude-session",
+  "cwd": "__PROJECT__",
+  "hook_event_name": "SessionStart",
+  "source": "startup"
+}

@@ -425,11 +425,12 @@ elif check_auto_memory:
 if root.exists():
     for instruction_file in instruction_required_files:
         target = project_root / instruction_file
+        target_mode = "codex" if instruction_file == "AGENTS.md" else "claude"
         if not target.is_file():
             add_finding(
                 "STR-701", integration_severity, "missing_instruction_file", target,
                 "Project instruction file is missing the Pensieve short routing block.",
-                "Run sync-instructions to create/update CLAUDE.md and AGENTS.md with the Pensieve How To Use block.",
+                f"Run sync-instructions --target {target_mode} to add the Pensieve How To Use block to {instruction_file}.",
             )
             continue
 
@@ -442,7 +443,7 @@ if root.exists():
             add_finding(
                 "STR-702", integration_severity, "instruction_block_malformed", target,
                 "Project instruction file is missing or has a malformed Pensieve routing marker block.",
-                "Run sync-instructions to insert a valid Pensieve How To Use block. If markers are duplicated or unpaired, fix them manually first.",
+                f"Run sync-instructions --target {target_mode} to insert a valid block. If markers are duplicated or unpaired, fix them manually first.",
             )
             continue
 
@@ -452,7 +453,7 @@ if root.exists():
             add_finding(
                 "STR-703", integration_severity, "instruction_content_drift", target,
                 "Project instruction file Pensieve routing block is missing required short-route content.",
-                "Run sync-instructions to refresh the Pensieve How To Use block from current pipeline routes.",
+                f"Run sync-instructions --target {target_mode} to refresh the block from current pipeline routes.",
             )
 
 # Check for inline graph in state.md (should be a reference pointer, not full content).

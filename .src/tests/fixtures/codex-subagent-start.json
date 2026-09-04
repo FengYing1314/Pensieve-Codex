@@ -1,0 +1,7 @@
+{
+  "session_id": "codex-session",
+  "cwd": "__PROJECT__",
+  "hook_event_name": "SubagentStart",
+  "agent_id": "agent-1",
+  "agent_type": "explorer"
+}
