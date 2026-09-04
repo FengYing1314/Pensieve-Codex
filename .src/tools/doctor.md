@@ -18,7 +18,7 @@ description: Scan the current project's .pensieve/ data and only the selected cl
 Set `PENSIEVE_SKILL_ROOT` to the checkout or plugin root.
 
 ```bash
-bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-doctor.sh" --client auto --strict
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-doctor.sh" --strict
 ```
 
 Doctor only maintains:

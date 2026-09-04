@@ -41,6 +41,16 @@ ensure_home() {
     export HOME
 }
 
+claude_config_root() {
+    if [[ -n "${CLAUDE_CONFIG_DIR:-}" ]]; then
+        to_posix_path "$CLAUDE_CONFIG_DIR"
+        return 0
+    fi
+    local home_dir
+    home_dir="$(resolve_home)" || return 1
+    echo "$home_dir/.claude"
+}
+
 # Sync marker: v2026-03-10 — run-hook.sh has a standalone copy; keep in sync.
 to_posix_path() {
     local raw_path="$1"
@@ -241,11 +251,21 @@ pensieve_client() {
         return 0
     fi
 
-    if [[ -n "${CLAUDE_PROJECT_DIR:-}" || -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
+    # Codex exports CLAUDE_PLUGIN_ROOT as a compatibility alias, so its native
+    # PLUGIN_ROOT must win when both are present.
+    if [[ -n "${PLUGIN_ROOT:-}" ]]; then
+        echo "codex"
+        return 0
+    fi
+    if [[ -n "${CLAUDE_PROJECT_DIR:-}" ]]; then
         echo "claude"
         return 0
     fi
-    if [[ -n "${PLUGIN_ROOT:-}" || -n "${CODEX_HOME:-}" ]]; then
+    if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
+        echo "claude"
+        return 0
+    fi
+    if [[ -n "${CODEX_HOME:-}" ]]; then
         echo "codex"
         return 0
     fi
@@ -314,13 +334,9 @@ skill_version() {
 
 auto_memory_project_key() {
     local pr
-    if [[ -n "${CLAUDE_PROJECT_DIR:-}" ]]; then
-        # Normalize to POSIX before encoding — ensures the same key regardless
-        # of whether the caller or env var uses Windows vs POSIX paths.
-        pr="$(to_posix_path "$CLAUDE_PROJECT_DIR")"
-    else
-        pr="$(project_root "${1:-$(pwd)}")"
-    fi
+    # Reuse the canonical project resolver so nested .pensieve roots and an
+    # explicit Hook-selected root cannot diverge from the memory index key.
+    pr="$(project_root "${1:-$(pwd)}")"
     [[ -n "$pr" ]] || {
         echo ""
         return 0
@@ -332,10 +348,10 @@ auto_memory_project_key() {
 }
 
 auto_memory_dir() {
-    local home_dir key
-    home_dir="$(resolve_home)" || { echo "auto_memory_dir: cannot resolve home" >&2; return 1; }
+    local config_root key
+    config_root="$(claude_config_root)" || { echo "auto_memory_dir: cannot resolve Claude config root" >&2; return 1; }
     key="$(auto_memory_project_key "${1:-$(pwd)}")"
-    echo "$home_dir/.claude/projects/$key/memory"
+    echo "$config_root/projects/$key/memory"
 }
 
 auto_memory_file() {

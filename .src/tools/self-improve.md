@@ -43,7 +43,7 @@ After writing user data, refresh the project state and graph:
 Set `PENSIEVE_SKILL_ROOT` to the checkout or plugin root.
 
 ```bash
-bash "$PENSIEVE_SKILL_ROOT/.src/scripts/maintain-project-state.sh" --client auto --event self-improve --note "description"
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/maintain-project-state.sh" --event self-improve --note "description"
 ```
 
 Claude Code and Codex can trigger this automatically through their native edit hooks. Run it manually when hooks are unavailable, disabled, or awaiting trust.

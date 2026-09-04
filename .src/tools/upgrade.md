@@ -20,19 +20,19 @@ This tool updates source checkouts only. An installed Codex snapshot must use `-
 Set `PENSIEVE_SKILL_ROOT` to the checkout or installed plugin root.
 
 ```bash
-bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-upgrade.sh" --client auto
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-upgrade.sh"
 ```
 
 Optional dry-run:
 
 ```bash
-bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-upgrade.sh" --client auto --dry-run
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-upgrade.sh" --dry-run
 ```
 
 After upgrade, manually run:
 
 ```bash
-bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-doctor.sh" --client auto --strict
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-doctor.sh" --strict
 ```
 
 There is no force-reset fallback. If fast-forward fails, resolve the source checkout explicitly and retry.

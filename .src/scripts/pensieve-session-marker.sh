@@ -136,7 +136,7 @@ def normalize_event(raw: str) -> str:
 
 
 if mode == "session-start":
-    semantics = hook_runtime.session_semantics(project_root, skill_root, skill_version)
+    semantics = hook_runtime.session_semantics(project_root, skill_version)
     if semantics is not None:
         print(json.dumps(hook_runtime.render_context_output(client, semantics), ensure_ascii=False))
     raise SystemExit(0)

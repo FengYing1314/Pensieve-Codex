@@ -161,9 +161,10 @@ def _build_report(
     lines.append(f"- Legacy v1 paths found: {_yes_no(flags.get('has_deprecated_paths'))}")
     lines.append(f"- Missing required dirs: {_yes_no(flags.get('has_missing_directories'))}")
     lines.append(f"- Critical file drift: {_yes_no(flags.get('has_critical_file_drift'))}")
-    lines.append(
-        f"- MEMORY.md missing/drifted: {_yes_no(flags.get('has_missing_memory_file') or flags.get('has_memory_content_drift'))}"
-    )
+    if client in {"claude", "both"}:
+        lines.append(
+            f"- Claude MEMORY.md missing/drifted: {_yes_no(flags.get('has_missing_memory_file') or flags.get('has_memory_content_drift'))}"
+        )
     lines.append(
         f"- Instruction files missing/drifted: {_yes_no(flags.get('has_missing_instruction_file') or flags.get('has_instruction_block_malformed') or flags.get('has_instruction_content_drift'))}"
     )
@@ -180,7 +181,17 @@ def _build_report(
         lines.append("2. Re-run `doctor` to confirm MUST_FIX count is zero.")
         lines.append("3. If structure migration issues appear later, run `migrate`.")
     elif must_fix and has_sync_instructions_must_fix:
-        lines.append("1. Run `sync-instructions` to write the Pensieve short routing block into CLAUDE.md and AGENTS.md.")
+        if client == "codex":
+            instruction_target = "AGENTS.md"
+        elif client == "claude":
+            instruction_target = "CLAUDE.md"
+        elif client == "both":
+            instruction_target = "CLAUDE.md and AGENTS.md"
+        else:
+            instruction_target = "the selected instruction file(s)"
+        lines.append(
+            f"1. Run `sync-instructions` to write the Pensieve short routing block into {instruction_target}."
+        )
         lines.append("2. Re-run `doctor` to confirm MUST_FIX count is zero.")
         lines.append("3. If marker pairs are malformed, fix duplicate/unpaired markers manually first.")
     elif must_fix:

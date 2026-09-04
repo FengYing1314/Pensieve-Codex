@@ -24,14 +24,10 @@ This tool only writes short routes. It does not generate project summaries or in
 
 Set `PENSIEVE_SKILL_ROOT` to the checkout or plugin root.
 
-```bash
-bash "$PENSIEVE_SKILL_ROOT/.src/scripts/sync-instructions.sh" --client auto --target all
-```
-
-To update only existing entry files without creating new `CLAUDE.md` / `AGENTS.md` files:
+The default updates only the active client's instruction file. In generic mode it updates recognized files that already exist and refuses to create both implicitly:
 
 ```bash
-bash "$PENSIEVE_SKILL_ROOT/.src/scripts/sync-instructions.sh" --client auto --target auto
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/sync-instructions.sh"
 ```
 
 Client-specific targets:
@@ -39,6 +35,7 @@ Client-specific targets:
 ```bash
 bash "$PENSIEVE_SKILL_ROOT/.src/scripts/sync-instructions.sh" --client codex --target codex
 bash "$PENSIEVE_SKILL_ROOT/.src/scripts/sync-instructions.sh" --client claude --target claude
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/sync-instructions.sh" --client both --target all
 ```
 
 `agents` and `agent` remain compatibility aliases for `codex`.

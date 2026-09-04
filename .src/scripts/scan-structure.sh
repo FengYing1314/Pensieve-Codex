@@ -407,7 +407,7 @@ elif check_auto_memory:
         add_finding(
             "STR-501", integration_severity, "missing_memory_file", memory_file,
             "Claude Code auto memory entry MEMORY.md is missing.",
-            "Run init/migrate/doctor to trigger auto memory creation, or manually add the Pensieve guidance block to ~/.claude/projects/<project>/memory/MEMORY.md.",
+            "Run init/migrate/doctor to create the Pensieve guidance block under the active Claude config directory.",
         )
     else:
         memory_text = read_text_normalized(memory_file)
@@ -416,7 +416,7 @@ elif check_auto_memory:
             add_finding(
                 "STR-502", integration_severity, "memory_content_drift", memory_file,
                 "MEMORY.md is missing the Pensieve description, or its content is not aligned with the skill description.",
-                "Run init/migrate/doctor to trigger auto memory alignment, ensuring MEMORY.md matches the SKILL.md description and includes the pensieve skill guidance.",
+                "Run init/migrate/doctor to align MEMORY.md under the active Claude config directory with the current Pensieve skill guidance.",
             )
 
 # Project instruction files must expose the short Pensieve routing block.

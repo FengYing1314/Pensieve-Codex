@@ -24,10 +24,10 @@ Default pipeline seeds come from `.src/templates/pipelines/run-when-*.md`; do no
 
 ## Standard execution
 
-Set `PENSIEVE_SKILL_ROOT` to the checkout or plugin root. Choose the active client explicitly when known.
+Set `PENSIEVE_SKILL_ROOT` to the checkout or plugin root. The client adapter sets `PENSIEVE_CLIENT`; direct callers should set it explicitly when auto-detection is ambiguous.
 
 ```bash
-bash "$PENSIEVE_SKILL_ROOT/.src/scripts/init-project-data.sh" --client auto
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/init-project-data.sh"
 ```
 
 Then:
@@ -38,5 +38,5 @@ Then:
 4. Finally, remind the user to run doctor manually:
 
 ```bash
-bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-doctor.sh" --client auto --strict
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-doctor.sh" --strict
 ```

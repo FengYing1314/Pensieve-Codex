@@ -8,7 +8,7 @@ source "$SCRIPT_DIR/lib.sh"
 
 START_MARKER="<!-- pensieve:instructions:start -->"
 END_MARKER="<!-- pensieve:instructions:end -->"
-TARGET_MODE="all"
+TARGET_MODE="auto"
 CUSTOM_TARGETS=()
 CLIENT_REQUEST="${PENSIEVE_CLIENT:-auto}"
 
@@ -18,9 +18,9 @@ Usage:
   sync-instructions.sh [options]
 
 Options:
-  --target <mode>   all | auto | claude | codex | agents. Default: all
+  --target <mode>   all | auto | claude | codex | agents. Default: auto
                     all    updates/creates CLAUDE.md and AGENTS.md
-                    auto   updates existing CLAUDE.md/AGENTS.md, or creates both if neither exists
+                    auto   selects only the active client's file; generic mode updates existing files only
                     claude updates/creates CLAUDE.md
                     codex  updates/creates AGENTS.md
                     agents compatibility alias for codex
@@ -153,12 +153,12 @@ collect_targets() {
         claude)
           targets+=("$PROJECT_ROOT/CLAUDE.md")
           ;;
+        both)
+          targets+=("$PROJECT_ROOT/CLAUDE.md" "$PROJECT_ROOT/AGENTS.md")
+          ;;
         *)
           [[ -f "$PROJECT_ROOT/CLAUDE.md" ]] && targets+=("$PROJECT_ROOT/CLAUDE.md")
           [[ -f "$PROJECT_ROOT/AGENTS.md" ]] && targets+=("$PROJECT_ROOT/AGENTS.md")
-          if [[ "${#targets[@]}" -eq 0 ]]; then
-            targets+=("$PROJECT_ROOT/CLAUDE.md" "$PROJECT_ROOT/AGENTS.md")
-          fi
           ;;
       esac
       ;;
@@ -181,73 +181,91 @@ collect_targets() {
 sync_target_file() {
   local target="$1"
   local block_file="$2"
-  local out_file existed start_count end_count
-
-  mkdir -p "$(dirname "$target")"
+  local out_file existed start_count end_count status
 
   existed=0
   [[ -f "$target" ]] && existed=1
 
-  if [[ "$existed" -eq 0 || ! -s "$target" ]]; then
-    cp "$block_file" "$target"
-    if [[ "$existed" -eq 0 ]]; then
-      echo "created"
-    else
-      echo "updated"
-    fi
-    return 0
-  fi
-
-  start_count="$(grep -Fxc "$START_MARKER" "$target" || true)"
-  end_count="$(grep -Fxc "$END_MARKER" "$target" || true)"
-
-  if [[ "$start_count" -ne "$end_count" ]]; then
-    echo "Malformed Pensieve instruction block in $target" >&2
-    echo "Expected matching $START_MARKER and $END_MARKER markers." >&2
-    return 1
-  fi
-  if [[ "$start_count" -gt 1 ]]; then
-    echo "Malformed Pensieve instruction block in $target" >&2
-    echo "Expected at most one $START_MARKER marker." >&2
-    return 1
-  fi
-
   out_file="$(mktemp)"
-  if [[ "$start_count" -gt 0 ]]; then
-    awk -v start="$START_MARKER" -v end="$END_MARKER" -v block_file="$block_file" '
-      BEGIN {
-        while ((getline line < block_file) > 0) {
-          block = block line ORS
-        }
-        close(block_file)
-        in_block = 0
-      }
-      $0 == start {
-        printf "%s", block
-        in_block = 1
-        next
-      }
-      in_block {
-        if ($0 == end) {
+  if [[ "$existed" -eq 0 || ! -s "$target" ]]; then
+    cp "$block_file" "$out_file"
+  else
+    start_count="$(grep -Fxc "$START_MARKER" "$target" || true)"
+    end_count="$(grep -Fxc "$END_MARKER" "$target" || true)"
+
+    if [[ "$start_count" -ne "$end_count" ]]; then
+      rm -f "$out_file"
+      echo "Malformed Pensieve instruction block in $target" >&2
+      echo "Expected matching $START_MARKER and $END_MARKER markers." >&2
+      return 1
+    fi
+    if [[ "$start_count" -gt 1 ]]; then
+      rm -f "$out_file"
+      echo "Malformed Pensieve instruction block in $target" >&2
+      echo "Expected at most one $START_MARKER marker." >&2
+      return 1
+    fi
+
+    if [[ "$start_count" -gt 0 ]]; then
+      awk -v start="$START_MARKER" -v end="$END_MARKER" -v block_file="$block_file" '
+        BEGIN {
+          while ((getline line < block_file) > 0) {
+            block = block line ORS
+          }
+          close(block_file)
           in_block = 0
         }
-        next
-      }
-      {
-        print
-      }
-    ' "$target" > "$out_file"
-  else
-    cp "$target" "$out_file"
-    printf '\n' >> "$out_file"
-    cat "$block_file" >> "$out_file"
+        $0 == start {
+          printf "%s", block
+          in_block = 1
+          next
+        }
+        in_block {
+          if ($0 == end) {
+            in_block = 0
+          }
+          next
+        }
+        {
+          print
+        }
+      ' "$target" > "$out_file"
+    else
+      cp "$target" "$out_file"
+      printf '\n' >> "$out_file"
+      cat "$block_file" >> "$out_file"
+    fi
   fi
 
-  mv "$out_file" "$target"
-  echo "updated"
+  if ! status="$("$PYTHON_BIN" - "$target" "$out_file" "$SCRIPT_DIR/../core" <<'PY'
+from pathlib import Path
+import sys
+
+target = Path(sys.argv[1])
+candidate = Path(sys.argv[2])
+sys.path.insert(0, sys.argv[3])
+from hook_runtime import write_text_atomic_if_changed
+
+existed = target.is_file()
+changed = write_text_atomic_if_changed(target, candidate.read_text(encoding="utf-8"))
+print("unchanged" if not changed else ("updated" if existed else "created"))
+PY
+  )"; then
+    rm -f "$out_file"
+    return 1
+  fi
+  rm -f "$out_file"
+  echo "$status"
 }
 
+ensure_python_env
+[[ -n "${PYTHON_BIN:-}" ]] || { echo "Python not found" >&2; exit 1; }
+
 BLOCK_FILE="$(mktemp)"
+cleanup_sync_block() {
+  rm -f "$BLOCK_FILE"
+}
+trap cleanup_sync_block EXIT
 build_instruction_block > "$BLOCK_FILE"
 
 TARGETS=()
@@ -255,8 +273,7 @@ while IFS= read -r target; do
   [[ -n "$target" ]] && TARGETS+=("$target")
 done < <(collect_targets)
 if [[ "${#TARGETS[@]}" -eq 0 ]]; then
-  echo "No instruction targets resolved." >&2
-  rm -f "$BLOCK_FILE"
+  echo "No instruction targets resolved. Use --client codex|claude|both or an explicit --target/--file." >&2
   exit 1
 fi
 
@@ -271,6 +288,7 @@ for target in "${TARGETS[@]}"; do
 done
 
 rm -f "$BLOCK_FILE"
+trap - EXIT
 
 MARKER_SCRIPT="$SCRIPT_DIR/pensieve-session-marker.sh"
 if [[ -f "$MARKER_SCRIPT" ]]; then

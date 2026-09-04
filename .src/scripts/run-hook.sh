@@ -42,23 +42,10 @@ to_posix_path() {
 
 ROOT_RAW="${PENSIEVE_SKILL_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}"
 if [[ -z "$ROOT_RAW" ]]; then
-  # Resolve HOME reliably (may be unset on some Windows shell configurations).
-  if [[ -z "${HOME:-}" ]]; then
-    if [[ -n "${USERPROFILE:-}" ]]; then
-      HOME="$(to_posix_path "$USERPROFILE")"
-      export HOME
-    elif _h="$(cd ~ 2>/dev/null && pwd)"; then
-      HOME="$_h"
-      export HOME
-    fi
-  fi
-  # Legacy Claude Code installation fallback.
-  ROOT_RAW="${HOME:+$HOME/.claude/skills/pensieve}"
-  # Fallback: derive from script location
-  if [[ -z "$ROOT_RAW" || ! -d "$ROOT_RAW" ]]; then
-    SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    ROOT_RAW="$(cd "$SELF_DIR/../.." && pwd)"
-  fi
+  # The invoked launcher belongs to one concrete installation. Deriving from
+  # itself prevents a second Claude/Codex copy from silently taking over.
+  SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  ROOT_RAW="$(cd "$SELF_DIR/../.." && pwd)"
 fi
 ROOT="$(to_posix_path "$ROOT_RAW")"
 TARGET="$ROOT/.src/scripts/$SCRIPT_NAME"

@@ -9,7 +9,7 @@ Use this provider-neutral workflow before broad project exploration.
    - treat active `decisions/` and `maxims/` as settled constraints unless the user asks to revisit them;
    - follow a matching workflow from `pipelines/`;
    - treat `short-term/` as unpromoted evidence that still needs validation.
-4. Read at most five likely entries. If the graph has no useful match, perform at most two targeted text searches under `.pensieve/` before returning to source inspection.
+4. Read at most five likely entries. If the graph has no useful match, perform at most two targeted text searches under `.pensieve/`. Spend at most ten total recall operations before returning to source inspection.
 5. Stop when the question is answered, the budget is exhausted, or two searches add no useful evidence.
 
 Return four compact sections when they add value: Known Information, Known Pitfalls, Recommended Path, and To Explore. Cite project-relative entry paths. Do not write memory during recall alone; use the Pensieve `self-improve` or `refine` workflow for changes.

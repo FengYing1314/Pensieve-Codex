@@ -9,7 +9,7 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator, List, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Set, Tuple
 
 from hook_runtime import write_json_atomic_if_changed, write_text_atomic_if_changed
 
@@ -63,6 +63,24 @@ def copy_file_atomic(source: Path, destination: Path) -> None:
             tmp.unlink()
         except FileNotFoundError:
             pass
+
+
+def unique_conflict_path(
+    destination: Path,
+    source: Path,
+    timestamp: str,
+    reserved: Set[Path],
+) -> Path:
+    source_key = str(source.resolve(strict=False)).encode("utf-8", errors="surrogatepass")
+    source_id = hashlib.sha256(source_key).hexdigest()[:10]
+    base_name = f"{destination.stem}.migrated.{timestamp}.{source_id}"
+    candidate = destination.with_name(f"{base_name}{destination.suffix}")
+    counter = 2
+    while candidate.exists() or candidate in reserved:
+        candidate = destination.with_name(f"{base_name}.{counter}{destination.suffix}")
+        counter += 1
+    reserved.add(candidate)
+    return candidate
 
 
 def is_readme(path: Path, pattern: re.Pattern[str]) -> bool:
@@ -204,6 +222,7 @@ def run(args: argparse.Namespace) -> int:
         "removed_legacy_paths": [],
         "warnings": [],
     }
+    reserved_conflicts: Set[Path] = set()
 
     def ensure_dir(path: Path) -> None:
         if path.is_dir():
@@ -237,7 +256,12 @@ def run(args: argparse.Namespace) -> int:
                 elif source.read_bytes() == destination.read_bytes():
                     actions["migrated_files"].append({"from": str(source), "to": str(destination), "mode": "identical-skip"})
                 else:
-                    conflict = destination.with_name(f"{destination.stem}.migrated.{args.timestamp}{destination.suffix}")
+                    conflict = unique_conflict_path(
+                        destination,
+                        source,
+                        args.timestamp,
+                        reserved_conflicts,
+                    )
                     actions["conflict_files"].append({"from": str(source), "target": str(destination), "written": str(conflict)})
                     if not args.dry_run:
                         copy_file_atomic(source, conflict)

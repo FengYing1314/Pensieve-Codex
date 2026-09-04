@@ -88,6 +88,28 @@ if ! git -C "$UPDATE_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   exit 1
 fi
 
+UPDATE_ROOT_REAL="$(cd "$UPDATE_ROOT" && pwd -P)"
+GIT_TOP_LEVEL="$(git -C "$UPDATE_ROOT" rev-parse --show-toplevel)"
+GIT_TOP_LEVEL="$(to_posix_path "$GIT_TOP_LEVEL")"
+if [[ "$UPDATE_ROOT_REAL" != "$GIT_TOP_LEVEL" ]]; then
+  echo "Refusing to upgrade from a subdirectory of another Git repository: $UPDATE_ROOT" >&2
+  echo "Pass the Pensieve checkout root itself." >&2
+  exit 1
+fi
+
+MANIFEST_FILE="$UPDATE_ROOT/.src/manifest.json"
+if [[ "$(json_get_value "$MANIFEST_FILE" "name" "")" != "pensieve" ]]; then
+  echo "Refusing to upgrade an unrecognized checkout: $UPDATE_ROOT" >&2
+  echo "Expected .src/manifest.json with name=pensieve." >&2
+  exit 1
+fi
+for required_path in SKILL.md .src/core/schema.json .src/scripts/run-upgrade.sh; do
+  if [[ ! -f "$UPDATE_ROOT/$required_path" ]]; then
+    echo "Refusing to upgrade an incomplete Pensieve checkout: missing $required_path" >&2
+    exit 1
+  fi
+done
+
 if [[ -n "$(git -C "$UPDATE_ROOT" status --porcelain --untracked-files=normal)" ]]; then
   echo "Refusing to upgrade a dirty Pensieve checkout: $UPDATE_ROOT" >&2
   echo "Commit or otherwise resolve local changes first; no files were changed." >&2

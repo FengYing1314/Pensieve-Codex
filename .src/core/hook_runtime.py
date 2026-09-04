@@ -38,52 +38,16 @@ def normalize_client(value: Optional[str]) -> str:
     return client
 
 
-def detect_client(
-    requested: Optional[str] = None,
-    *,
-    env: Optional[Mapping[str, str]] = None,
-    skill_root: Optional[Path] = None,
-) -> str:
-    env_map = os.environ if env is None else env
-    explicit = requested if requested is not None else env_map.get("PENSIEVE_CLIENT", "auto")
-    client = normalize_client(explicit)
-    if client != "auto":
-        return client
-
-    if env_map.get("CLAUDE_PROJECT_DIR") or env_map.get("CLAUDE_PLUGIN_ROOT"):
-        return "claude"
-    if env_map.get("PLUGIN_ROOT") or env_map.get("CODEX_HOME"):
-        return "codex"
-
-    root_text = str(skill_root or "").replace("\\", "/").lower()
-    if "/.claude/" in root_text:
-        return "claude"
-    if "/.codex/" in root_text or "/plugins/cache/" in root_text:
-        return "codex"
-    return "generic"
-
-
-def find_pensieve_project(cwd: Path, explicit_root: Optional[Path] = None) -> Optional[Path]:
-    candidates = []
-    if explicit_root is not None:
-        candidates.append(explicit_root)
-    candidates.append(cwd)
-
-    seen = set()
-    for candidate in candidates:
-        try:
-            current = candidate.expanduser().resolve()
-        except OSError:
-            continue
-        if current.is_file():
-            current = current.parent
-        for directory in (current, *current.parents):
-            key = str(directory)
-            if key in seen:
-                continue
-            seen.add(key)
-            if (directory / ".pensieve").is_dir():
-                return directory
+def find_pensieve_project(cwd: Path) -> Optional[Path]:
+    try:
+        current = cwd.expanduser().resolve()
+    except OSError:
+        return None
+    if current.is_file():
+        current = current.parent
+    for directory in (current, *current.parents):
+        if (directory / ".pensieve").is_dir():
+            return directory
     return None
 
 
@@ -96,11 +60,20 @@ def read_json_object(path: Path) -> dict[str, Any]:
 
 
 def write_text_atomic_if_changed(path: Path, content: str) -> bool:
+    if path.is_symlink():
+        path = path.resolve(strict=True)
     try:
         if path.read_text(encoding="utf-8") == content:
             return False
-    except OSError:
+    except FileNotFoundError:
         pass
+    try:
+        target_mode = path.stat().st_mode & 0o777
+    except FileNotFoundError:
+        current_umask = os.umask(0)
+        os.umask(current_umask)
+        target_mode = 0o666 & ~current_umask
+
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, raw_tmp = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=str(path.parent))
     tmp = Path(raw_tmp)
@@ -109,6 +82,7 @@ def write_text_atomic_if_changed(path: Path, content: str) -> bool:
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
+        os.chmod(tmp, target_mode)
         os.replace(str(tmp), str(path))
     finally:
         try:
@@ -159,7 +133,6 @@ def count_due_short_term(data_root: Path, *, today: Optional[dt.date] = None, tt
 
 def session_semantics(
     project_root: Path,
-    skill_root: Path,
     skill_version: str,
     *,
     today: Optional[dt.date] = None,
@@ -211,7 +184,8 @@ def recall_context() -> str:
         "[Pensieve recall] Before broad exploration, inspect .pensieve/state.md and the generated graph on demand. "
         "Reuse relevant knowledge for file locations and call chains; obey active decisions and maxims; follow a matching "
         "pipeline; treat short-term entries as unpromoted evidence. Read at most five likely entries, then use at most two "
-        "targeted searches under .pensieve before returning to source inspection. Cite the entry paths in the briefing."
+        "targeted searches and ten total recall operations before returning to source inspection. Cite the entry paths in "
+        "the briefing."
     )
 
 
@@ -310,11 +284,11 @@ def post_tool_semantics(
 
 
 def render_context_output(client: str, semantics: HookSemantics) -> dict[str, Any]:
-    normalized_client = normalize_client(client)
+    normalize_client(client)
     if semantics.event == "session-start":
         event_name = "SessionStart"
     elif semantics.event == "subagent-start":
-        event_name = "SubagentStart" if normalized_client == "codex" else "PreToolUse"
+        event_name = "SubagentStart"
     else:
         event_name = "PostToolUse"
 
@@ -339,16 +313,6 @@ def render_claude_subagent_output(payload: Mapping[str, Any], semantics: HookSem
     return {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
-            "permissionDecision": "allow",
             "updatedInput": updated_input,
-        }
-    }
-
-
-def claude_allow_output() -> dict[str, Any]:
-    return {
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "allow",
         }
     }

@@ -47,10 +47,10 @@ def output_json(payload: Mapping[str, Any]) -> None:
     sys.stdout.write(json.dumps(dict(payload), ensure_ascii=False) + "\n")
 
 
-def maintain_project(client: str, project_root: Path, paths: tuple[str, ...], tool_name: str) -> None:
+def maintain_project(client: str, project_root: Path, paths: tuple[str, ...], tool_name: str) -> bool:
     maintain = SKILL_ROOT / ".src" / "scripts" / "maintain-project-state.sh"
     if not maintain.is_file():
-        return
+        return False
     note = f"posttooluse {tool_name or 'unknown'}: {', '.join(paths)}"
     env = os.environ.copy()
     env.update(
@@ -60,13 +60,34 @@ def maintain_project(client: str, project_root: Path, paths: tuple[str, ...], to
             "PENSIEVE_SKILL_ROOT": str(SKILL_ROOT),
         }
     )
-    subprocess.run(
-        ["bash", str(maintain), "--client", client, "--event", "sync", "--note", note],
-        env=env,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
+    try:
+        completed = subprocess.run(
+            ["bash", str(maintain), "--client", client, "--event", "sync", "--note", note],
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=25,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return completed.returncode == 0
+
+
+def output_maintenance_warning(client: str) -> None:
+    message = (
+        "[Pensieve] Automatic project-state refresh failed after a memory edit. "
+        f"Run pensieve doctor for the {client} client to refresh the graph and diagnose the failure."
+    )
+    output_json(
+        {
+            "systemMessage": message,
+            "hookSpecificOutput": {
+                "hookEventName": "PostToolUse",
+                "additionalContext": message,
+            },
+        }
     )
 
 
@@ -74,12 +95,11 @@ def main() -> int:
     args = parse_args()
     payload = read_payload()
     cwd = payload_cwd(payload)
-    explicit = os.environ.get("PENSIEVE_PROJECT_ROOT")
-    project_root = hook_runtime.find_pensieve_project(cwd, Path(explicit) if explicit else None)
+    project_root = hook_runtime.find_pensieve_project(cwd)
+    payload_event = payload.get("hook_event_name")
+    payload_event = payload_event if isinstance(payload_event, str) else ""
 
     if project_root is None:
-        if args.client == "claude" and args.event == "subagent-start":
-            output_json(hook_runtime.claude_allow_output())
         return 0
 
     os.environ["PENSIEVE_PROJECT_ROOT"] = str(project_root)
@@ -89,24 +109,21 @@ def main() -> int:
     if args.event == "session-start":
         manifest = hook_runtime.read_json_object(SKILL_ROOT / ".src" / "manifest.json")
         version = str(manifest.get("version") or "unknown")
-        semantics = hook_runtime.session_semantics(project_root, SKILL_ROOT, version)
+        semantics = hook_runtime.session_semantics(project_root, version)
         if semantics is not None:
             output_json(hook_runtime.render_context_output(args.client, semantics))
         return 0
 
     if args.event == "subagent-start":
-        if args.client == "claude":
+        if args.client == "claude" and payload_event == "PreToolUse":
             tool_input = payload.get("tool_input")
             agent_type = tool_input.get("subagent_type") if isinstance(tool_input, Mapping) else ""
             if agent_type not in {"Explore", "Plan"}:
-                output_json(hook_runtime.claude_allow_output())
                 return 0
         semantics = hook_runtime.subagent_semantics(project_root)
         if semantics is None:
-            if args.client == "claude":
-                output_json(hook_runtime.claude_allow_output())
             return 0
-        if args.client == "claude":
+        if args.client == "claude" and payload_event == "PreToolUse":
             output_json(hook_runtime.render_claude_subagent_output(payload, semantics))
         else:
             output_json(hook_runtime.render_context_output(args.client, semantics))
@@ -120,12 +137,14 @@ def main() -> int:
     )
     if semantics is not None:
         tool_name = payload.get("tool_name")
-        maintain_project(
+        maintained = maintain_project(
             args.client,
             project_root,
             semantics.changed_paths,
             tool_name if isinstance(tool_name, str) else "",
         )
+        if not maintained:
+            output_maintenance_warning(args.client)
     return 0
 
 
@@ -135,4 +154,7 @@ if __name__ == "__main__":
     except Exception:
         # Hooks are optional integration. A malformed payload or local runtime issue
         # must never block the user's editing flow.
+        sys.stderr.write(
+            "[Pensieve] Optional hook failed. Run pensieve doctor to refresh project state and inspect the installation.\n"
+        )
         raise SystemExit(0)
