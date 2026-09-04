@@ -69,6 +69,8 @@ system_skill_file = Path(sys.argv[2])
 event = (sys.argv[3] or "").strip()
 schema_file = Path(sys.argv[4])
 skill_root = Path(sys.argv[5])
+sys.path.insert(0, str(skill_root / ".src" / "core"))
+from hook_runtime import write_text_atomic_if_changed
 
 # Load shared core module.
 core_file = skill_root / ".src" / "core" / "pensieve_core.py"
@@ -127,8 +129,7 @@ else:
 
 updated = upsert_block(original, block)
 if updated != original:
-    memory_file.parent.mkdir(parents=True, exist_ok=True)
-    memory_file.write_text(updated, encoding="utf-8")
+    write_text_atomic_if_changed(memory_file, updated)
     action = "updated" if original else "created"
 else:
     action = "unchanged"

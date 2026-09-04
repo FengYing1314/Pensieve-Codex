@@ -19,6 +19,8 @@ Options:
   --scan-output <path>      Structure scan json path. Default: <state-dir>/pensieve-structure-scan.json
   --frontmatter-output <path> Frontmatter scan json path. Default: <state-dir>/pensieve-frontmatter-scan.json
   --graph-output <path>     Graph markdown path. Default: <state-dir>/pensieve-user-data-graph.md
+  --client <name>           auto | codex | claude | both | generic
+  --require-integration     Treat missing selected-client integration as MUST_FIX
   --skip-maintain-state     Skip maintain-project-state after report generation
   --strict                  Exit 3 when final status is FAIL
   -h, --help                Show help
@@ -34,6 +36,8 @@ FRONTMATTER_OUTPUT=""
 GRAPH_OUTPUT=""
 SKIP_MAINTAIN_STATE=0
 STRICT_MODE=0
+CLIENT_REQUEST="${PENSIEVE_CLIENT:-auto}"
+REQUIRE_INTEGRATION=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -76,6 +80,15 @@ while [[ $# -gt 0 ]]; do
       SKIP_MAINTAIN_STATE=1
       shift
       ;;
+    --client)
+      [[ $# -ge 2 ]] || { echo "Missing value for --client" >&2; exit 1; }
+      CLIENT_REQUEST="$2"
+      shift 2
+      ;;
+    --require-integration)
+      REQUIRE_INTEGRATION=1
+      shift
+      ;;
     --strict)
       STRICT_MODE=1
       shift
@@ -91,6 +104,9 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+CLIENT="$(pensieve_client "$CLIENT_REQUEST" "$SCRIPT_DIR")"
+export PENSIEVE_CLIENT="$CLIENT"
 
 PROJECT_ROOT="$(project_root)" || exit 1
 PROJECT_ROOT="$(to_posix_path "$PROJECT_ROOT")"
@@ -134,7 +150,11 @@ DOCTOR_ENGINE="$SKILL_ROOT/.src/core/doctor_engine.py"
 [[ -x "$GRAPH_SCRIPT" ]] || { echo "Missing executable: $GRAPH_SCRIPT" >&2; exit 1; }
 [[ -f "$DOCTOR_ENGINE" ]] || { echo "Missing core engine: $DOCTOR_ENGINE" >&2; exit 1; }
 
-bash "$SCAN_SCRIPT" --root "$ROOT" --format json --output "$SCAN_OUTPUT"
+SCAN_ARGS=(--root "$ROOT" --format json --output "$SCAN_OUTPUT" --client "$CLIENT")
+if [[ "$REQUIRE_INTEGRATION" -eq 1 ]]; then
+  SCAN_ARGS+=(--require-integration)
+fi
+bash "$SCAN_SCRIPT" "${SCAN_ARGS[@]}"
 bash "$FRONTMATTER_SCRIPT" --root "$ROOT" --format json > "$FRONTMATTER_OUTPUT"
 bash "$GRAPH_SCRIPT" --root "$ROOT" --output "$GRAPH_OUTPUT" >/dev/null
 
@@ -151,10 +171,11 @@ SUMMARY_INFO="$(json_get_value "$SUMMARY_JSON" "info" "0")"
 SUMMARY_NEXT="$(json_get_value "$SUMMARY_JSON" "next_step" "none")"
 
 if [[ "$SKIP_MAINTAIN_STATE" -eq 0 && -x "$MAINTAIN_SCRIPT" ]]; then
-  bash "$MAINTAIN_SCRIPT" --event doctor --note "doctor summary: status=$SUMMARY_STATUS, must_fix=$SUMMARY_MUST_FIX, should_fix=$SUMMARY_SHOULD_FIX, info=$SUMMARY_INFO, next=$SUMMARY_NEXT" >/dev/null || true
+  bash "$MAINTAIN_SCRIPT" --client "$CLIENT" --event doctor --note "doctor summary: status=$SUMMARY_STATUS, must_fix=$SUMMARY_MUST_FIX, should_fix=$SUMMARY_SHOULD_FIX, info=$SUMMARY_INFO, next=$SUMMARY_NEXT" >/dev/null || true
 fi
 
 echo "✅ Doctor completed"
+echo "  - client: $CLIENT"
 echo "  - status: $SUMMARY_STATUS"
 echo "  - must_fix: $SUMMARY_MUST_FIX"
 echo "  - should_fix: $SUMMARY_SHOULD_FIX"
@@ -164,7 +185,7 @@ echo "  - summary: $SUMMARY_JSON"
 
 MARKER_SCRIPT="$SCRIPT_DIR/pensieve-session-marker.sh"
 if [[ "$SUMMARY_STATUS" != "FAIL" && -f "$MARKER_SCRIPT" ]]; then
-  bash "$MARKER_SCRIPT" --mode record --event doctor || true
+  bash "$MARKER_SCRIPT" --client "$CLIENT" --mode record --event doctor || true
 fi
 
 if [[ "$STRICT_MODE" -eq 1 && "$SUMMARY_STATUS" == "FAIL" ]]; then

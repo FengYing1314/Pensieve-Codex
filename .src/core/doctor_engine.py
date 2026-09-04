@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from hook_runtime import write_text_atomic_if_changed
+
 
 def _load_json(path: Path) -> dict[str, Any]:
     try:
@@ -102,6 +104,8 @@ def _build_report(
     has_migrate_must_fix: bool,
     has_upgrade_must_fix: bool,
     has_sync_instructions_must_fix: bool,
+    client: str,
+    require_integration: bool,
 ) -> str:
     if graph_stats["unresolved"] == 0:
         graph_observation = "All graph links resolved."
@@ -116,6 +120,7 @@ def _build_report(
     lines.append(f"- Check time: {check_time}")
     lines.append(f"- Project root: `{project_root}`")
     lines.append(f"- Data root: `{user_root}`")
+    lines.append(f"- Client integration: `{client}` ({'required' if require_integration else 'advisory'})")
     lines.append("")
     lines.append("## 1) Executive Summary")
     lines.append(f"- Overall status: {status}")
@@ -248,6 +253,8 @@ def run(argv: list[str]) -> int:
     frontmatter = _load_json(frontmatter_file)
     schema = _load_json(schema_file)
     graph_stats, unresolved_links = _parse_graph(graph_file)
+    client = str(scan.get("client") or "generic")
+    require_integration = bool(scan.get("require_integration"))
 
     findings: list[Finding] = []
 
@@ -348,7 +355,12 @@ def run(argv: list[str]) -> int:
         status = "FAIL"
     elif should_fix or info:
         status = "PASS_WITH_WARNINGS"
-        next_step = "self-improve"
+        if any(f.category in {"deprecated_path", "missing_seed_file"} for f in should_fix):
+            next_step = "migrate"
+        elif any(f.category.startswith("missing_instruction") or f.category.startswith("instruction_") for f in should_fix):
+            next_step = "sync-instructions"
+        else:
+            next_step = "self-improve"
     else:
         status = "PASS"
         next_step = "none"
@@ -372,8 +384,10 @@ def run(argv: list[str]) -> int:
         has_migrate_must_fix=has_migrate_must_fix,
         has_upgrade_must_fix=has_upgrade_must_fix,
         has_sync_instructions_must_fix=has_sync_instructions_must_fix,
+        client=client,
+        require_integration=require_integration,
     )
-    report_file.write_text(report_text, encoding="utf-8")
+    write_text_atomic_if_changed(report_file, report_text)
 
     summary = {
         "status": status,
@@ -383,12 +397,14 @@ def run(argv: list[str]) -> int:
         "next_step": next_step,
         "project_root": project_root,
         "data_root": user_root,
+        "client": client,
+        "require_integration": require_integration,
         "report_file": str(report_file),
         "scan_file": str(scan_file),
         "frontmatter_file": str(frontmatter_file),
         "graph_file": str(graph_file),
     }
-    summary_file.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_text_atomic_if_changed(summary_file, json.dumps(summary, ensure_ascii=False, indent=2) + "\n")
     print(json.dumps(summary, ensure_ascii=False))
     return 0
 

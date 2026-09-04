@@ -39,7 +39,6 @@
   "instructions": {
     "start_marker": "<!-- pensieve:instructions:start -->",
     "end_marker": "<!-- pensieve:instructions:end -->",
-    "required_files": ["CLAUDE.md", "AGENTS.md"],
     "required_fragments": [
       "## How To Use Pensieve",
       "Use `.pensieve/` as the first source of architectural intent.",
@@ -53,6 +52,20 @@
       "use `.pensieve/pipelines/run-when-reviewing-code.md`"
     ]
   },
+  "integrations": {
+    "claude": {
+      "instruction_files": ["CLAUDE.md"],
+      "auto_memory": true
+    },
+    "codex": {
+      "instruction_files": ["AGENTS.md"],
+      "auto_memory": false
+    },
+    "generic": {
+      "instruction_files": [],
+      "auto_memory": false
+    }
+  },
   "doctor": {
     "next_step": {
       "migrate_categories": [
@@ -60,7 +73,7 @@
         "missing_directory",
         "deprecated_path",
         "missing_critical_file",
-        "critical_file_drift"
+        "missing_seed_file"
       ],
       "sync_instructions_categories": [
         "missing_instruction_file",

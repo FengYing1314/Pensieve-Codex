@@ -163,7 +163,7 @@ with marker_lock(marker_file.parent):
         state["self_check_at"] = ""
 
     normalized = normalize_event(event)
-    if normalized == "init":
+    if normalized in {"init", "migrate"}:
         state["initialized"] = True
     elif normalized == "doctor" and state["initialized"]:
         state["self_check_version"] = skill_version

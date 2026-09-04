@@ -10,13 +10,15 @@ source "$SCRIPT_DIR/lib.sh"
 usage() {
   cat <<'USAGE'
 Usage:
-  scan-structure.sh [--root <path>] [--output <path>] [--format <json|text>] [--fail-on-drift]
+  scan-structure.sh [--root <path>] [--output <path>] [--format <json|text>] [--client <name>] [--require-integration] [--fail-on-drift]
 
 Options:
   --root <path>       Scan root. Default: current user data root
   --output <path>     Output file path. Default: stdout
   --format <fmt>      Output format: json | text. Default: json
   --fail-on-drift     Exit with code 3 when MUST_FIX findings exist
+  --client <name>     auto | codex | claude | both | generic
+  --require-integration  Promote selected-client integration findings to MUST_FIX
   -h, --help          Show help
 USAGE
 }
@@ -25,6 +27,8 @@ ROOT=""
 OUTPUT="-"
 FORMAT="json"
 FAIL_ON_DRIFT=0
+CLIENT_REQUEST="${PENSIEVE_CLIENT:-auto}"
+REQUIRE_INTEGRATION=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -45,6 +49,15 @@ while [[ $# -gt 0 ]]; do
       ;;
     --fail-on-drift)
       FAIL_ON_DRIFT=1
+      shift
+      ;;
+    --client)
+      [[ $# -ge 2 ]] || { echo "Missing value for --client" >&2; exit 1; }
+      CLIENT_REQUEST="$2"
+      shift 2
+      ;;
+    --require-integration)
+      REQUIRE_INTEGRATION=1
       shift
       ;;
     -h|--help)
@@ -70,11 +83,16 @@ esac
 
 PROJECT_ROOT="$(project_root)" || exit 1
 PROJECT_ROOT="$(to_posix_path "$PROJECT_ROOT")"
+CLIENT="$(pensieve_client "$CLIENT_REQUEST" "$SCRIPT_DIR")"
+export PENSIEVE_CLIENT="$CLIENT"
 if [[ -z "$ROOT" ]]; then
   ROOT="$(user_data_root)"
 fi
 ROOT="$(to_posix_path "$ROOT")"
-AUTO_MEMORY_FILE="$(to_posix_path "$(auto_memory_file)")"
+AUTO_MEMORY_FILE=""
+if [[ "$CLIENT" == "claude" || "$CLIENT" == "both" ]]; then
+  AUTO_MEMORY_FILE="$(to_posix_path "$(auto_memory_file)")"
+fi
 
 if [[ "$OUTPUT" != "-" ]]; then
   OUTPUT="$(to_posix_path "$OUTPUT")"
@@ -92,7 +110,7 @@ ensure_python_env
 [[ -n "${PYTHON_BIN:-}" ]] || { echo "Python not found" >&2; exit 1; }
 HOME_DIR="$(resolve_home 2>/dev/null || echo "")"
 
-"$PYTHON_BIN" - "$ROOT" "$PROJECT_ROOT" "$SKILL_ROOT" "$SCHEMA_FILE" "$HOME_DIR" "$AUTO_MEMORY_FILE" "$FORMAT" "$OUTPUT" "$TIMESTAMP" "$FAIL_ON_DRIFT" <<'PY'
+"$PYTHON_BIN" - "$ROOT" "$PROJECT_ROOT" "$SKILL_ROOT" "$SCHEMA_FILE" "$HOME_DIR" "$AUTO_MEMORY_FILE" "$FORMAT" "$OUTPUT" "$TIMESTAMP" "$FAIL_ON_DRIFT" "$CLIENT" "$REQUIRE_INTEGRATION" <<'PY'
 from __future__ import annotations
 
 import importlib.util
@@ -128,11 +146,16 @@ project_root = Path(sys.argv[2])
 skill_root = Path(sys.argv[3])
 schema_file = Path(sys.argv[4])
 home_dir = Path(sys.argv[5]) if sys.argv[5] else Path.home()
-memory_file = Path(sys.argv[6])
+memory_file = Path(sys.argv[6]) if sys.argv[6] else None
 fmt = sys.argv[7]
 output = sys.argv[8]
 generated_at = sys.argv[9]
 fail_on_drift = sys.argv[10] == "1"
+client = sys.argv[11]
+require_integration = sys.argv[12] == "1"
+
+sys.path.insert(0, str(skill_root / ".src" / "core"))
+from hook_runtime import write_text_atomic_if_changed
 
 findings: list[Finding] = []
 dedupe_keys: set[tuple[str, str, str]] = set()
@@ -174,11 +197,20 @@ memory_guidance_line = str(
 instructions_cfg = schema.get("instructions") if isinstance(schema.get("instructions"), dict) else {}
 instruction_start_marker = str(instructions_cfg.get("start_marker", "<!-- pensieve:instructions:start -->"))
 instruction_end_marker = str(instructions_cfg.get("end_marker", "<!-- pensieve:instructions:end -->"))
-instruction_required_files = [
-    str(item)
-    for item in instructions_cfg.get("required_files", ["CLAUDE.md", "AGENTS.md"])
-    if isinstance(item, str) and item
-]
+integrations_cfg = schema.get("integrations") if isinstance(schema.get("integrations"), dict) else {}
+selected_integrations = ["claude", "codex"] if client == "both" else ([client] if client in {"claude", "codex"} else [])
+instruction_required_files = []
+check_auto_memory = False
+for integration_name in selected_integrations:
+    integration = integrations_cfg.get(integration_name, {})
+    if not isinstance(integration, dict):
+        continue
+    instruction_required_files.extend(
+        str(item) for item in integration.get("instruction_files", []) if isinstance(item, str) and item
+    )
+    check_auto_memory = check_auto_memory or bool(integration.get("auto_memory"))
+instruction_required_files = list(dict.fromkeys(instruction_required_files))
+integration_severity = "MUST_FIX" if require_integration else "SHOULD_FIX"
 instruction_required_fragments = [
     str(item)
     for item in instructions_cfg.get("required_fragments", [])
@@ -292,7 +324,7 @@ if not skill_file.is_file():
     add_finding(
         "STR-003", "MUST_FIX", "missing_skill_file", skill_file,
         "SKILL.md not found in skill root directory.",
-        "Ensure the skill is properly installed at ~/.claude/skills/pensieve/ with a tracked SKILL.md.",
+        "Ensure the Pensieve skill or plugin installation contains its tracked root SKILL.md.",
     )
 
 state_file = root / "state.md"
@@ -333,23 +365,23 @@ for p in legacy_project_paths + legacy_user_paths:
         continue
     if same_path(p, skill_root):
         add_finding(
-            "STR-101", "MUST_FIX", "deprecated_path", p,
+            "STR-101", "SHOULD_FIX", "deprecated_path", p,
             f"Legacy v1 data directory found: {p} (current skill_root — switch to user-level installation)",
-            "Install Pensieve at user level (~/.claude/skills/pensieve), then re-run migrate to clean up this project-level legacy path.",
+            "Install Pensieve at user level, run migrate to copy data, then use --cleanup-legacy only after reviewing the verified backup.",
         )
     else:
         add_finding(
-            "STR-101", "MUST_FIX", "deprecated_path", p,
+            "STR-101", "SHOULD_FIX", "deprecated_path", p,
             f"Legacy v1 data directory found: {p}",
-            "Run migrate to automatically move user data into .pensieve/ and clean up legacy paths.",
+            "Run migrate to copy user data into .pensieve/; use --cleanup-legacy separately after reviewing the verified backup.",
         )
 
 for target, template in critical_files:
     if not target.is_file():
         add_finding(
-            "STR-201", "MUST_FIX", "missing_critical_file", target,
-            "Missing critical seed file.",
-            "Run migrate to force-align critical files.",
+            "STR-201", "SHOULD_FIX", "missing_seed_file", target,
+            "Default seed file is missing.",
+            "Run migrate to add missing defaults without replacing customized files.",
         )
         continue
     if not template.is_file():
@@ -359,26 +391,21 @@ for target, template in critical_files:
             "Fix the skill installation or update to a complete version, then retry.",
         )
         continue
-    target_text = normalize_critical_file_content(target, read_text_normalized(target))
-    template_text = normalize_critical_file_content(template, read_text_normalized(template))
-    if target_text != template_text:
-        add_finding(
-            "STR-202", "MUST_FIX", "critical_file_drift", target,
-            "Critical file body content differs from template (context link value differences ignored).",
-            "Run migrate to back up and replace, restoring critical workflow file body alignment with the template.",
-        )
+    # Seed files become project-owned after creation. Customized content is not
+    # drift and must never be graded as damage.
 
 system_skill_description = core_module.load_skill_description(system_skill_file)
 if system_skill_description is None:
     add_finding(
         "STR-901", "MUST_FIX", "scanner_template_missing", system_skill_file,
-        "Template required for scanning is missing, cannot complete verification: System skill description missing, cannot verify MEMORY.md Pensieve guidance block",
+        "System skill description is missing or invalid.",
         "Fix the skill installation or update to a complete version, then retry.",
     )
-else:
+elif check_auto_memory:
+    assert memory_file is not None
     if not memory_file.is_file():
         add_finding(
-            "STR-501", "MUST_FIX", "missing_memory_file", memory_file,
+            "STR-501", integration_severity, "missing_memory_file", memory_file,
             "Claude Code auto memory entry MEMORY.md is missing.",
             "Run init/migrate/doctor to trigger auto memory creation, or manually add the Pensieve guidance block to ~/.claude/projects/<project>/memory/MEMORY.md.",
         )
@@ -387,7 +414,7 @@ else:
         memory_block = extract_pensieve_memory_block(memory_text)
         if system_skill_description not in memory_block or not has_memory_guidance(memory_block):
             add_finding(
-                "STR-502", "MUST_FIX", "memory_content_drift", memory_file,
+                "STR-502", integration_severity, "memory_content_drift", memory_file,
                 "MEMORY.md is missing the Pensieve description, or its content is not aligned with the skill description.",
                 "Run init/migrate/doctor to trigger auto memory alignment, ensuring MEMORY.md matches the SKILL.md description and includes the pensieve skill guidance.",
             )
@@ -400,7 +427,7 @@ if root.exists():
         target = project_root / instruction_file
         if not target.is_file():
             add_finding(
-                "STR-701", "MUST_FIX", "missing_instruction_file", target,
+                "STR-701", integration_severity, "missing_instruction_file", target,
                 "Project instruction file is missing the Pensieve short routing block.",
                 "Run sync-instructions to create/update CLAUDE.md and AGENTS.md with the Pensieve How To Use block.",
             )
@@ -413,7 +440,7 @@ if root.exists():
         )
         if block_error is not None:
             add_finding(
-                "STR-702", "MUST_FIX", "instruction_block_malformed", target,
+                "STR-702", integration_severity, "instruction_block_malformed", target,
                 "Project instruction file is missing or has a malformed Pensieve routing marker block.",
                 "Run sync-instructions to insert a valid Pensieve How To Use block. If markers are duplicated or unpaired, fix them manually first.",
             )
@@ -423,7 +450,7 @@ if root.exists():
         missing_fragments = [fragment for fragment in instruction_required_fragments if fragment not in block]
         if missing_fragments:
             add_finding(
-                "STR-703", "MUST_FIX", "instruction_content_drift", target,
+                "STR-703", integration_severity, "instruction_content_drift", target,
                 "Project instruction file Pensieve routing block is missing required short-route content.",
                 "Run sync-instructions to refresh the Pensieve How To Use block from current pipeline routes.",
             )
@@ -469,7 +496,9 @@ report = {
     "root": str(root),
     "project_root": str(project_root),
     "skill_root": str(skill_root),
-    "auto_memory_file": str(memory_file),
+    "client": client,
+    "require_integration": require_integration,
+    "auto_memory_file": str(memory_file) if memory_file is not None else "",
     "summary": {
         "must_fix_count": must_fix,
         "should_fix_count": should_fix,
@@ -509,7 +538,7 @@ else:
 if output == "-":
     sys.stdout.write(out)
 else:
-    Path(output).write_text(out, encoding="utf-8")
+    write_text_atomic_if_changed(Path(output), out)
 
 if fail_on_drift and must_fix > 0:
     sys.exit(3)
