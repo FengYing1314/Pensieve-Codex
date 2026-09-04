@@ -1,10 +1,7 @@
 {
   "session_id": "claude-session",
   "cwd": "__PROJECT__",
-  "hook_event_name": "PreToolUse",
-  "tool_name": "Agent",
-  "tool_input": {
-    "subagent_type": "Explore",
-    "prompt": "Locate the payment entry point."
-  }
+  "hook_event_name": "SubagentStart",
+  "agent_id": "agent-1",
+  "agent_type": "Explore"
 }

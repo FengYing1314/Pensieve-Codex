@@ -72,6 +72,7 @@ class PensieveTestCase(unittest.TestCase):
         for key in (
             "CLAUDE_PROJECT_DIR",
             "CLAUDE_PLUGIN_ROOT",
+            "CLAUDE_CONFIG_DIR",
             "PLUGIN_ROOT",
             "CODEX_HOME",
             "PENSIEVE_CLIENT",
@@ -117,7 +118,17 @@ class PensieveTestCase(unittest.TestCase):
     def init(self, client: str = "codex", project: Optional[Path] = None) -> None:
         self.run_script("init-project-data.sh", "--client", client, project=project)
 
-    def hook(self, client: str, event: str, payload: Mapping[str, Any]) -> subprocess.CompletedProcess:
+    def hook(
+        self,
+        client: str,
+        event: str,
+        payload: Mapping[str, Any],
+        *,
+        extra_env: Optional[Mapping[str, str]] = None,
+    ) -> subprocess.CompletedProcess:
+        environment = self.env()
+        if extra_env:
+            environment.update(extra_env)
         return subprocess.run(
             [
                 sys.executable,
@@ -128,7 +139,7 @@ class PensieveTestCase(unittest.TestCase):
                 event,
             ],
             cwd=str(self.project),
-            env=self.env(),
+            env=environment,
             input=json.dumps(dict(payload), ensure_ascii=False),
             text=True,
             stdout=subprocess.PIPE,
@@ -142,17 +153,47 @@ class PensieveTestCase(unittest.TestCase):
 
 
 class ClientAndPathTests(PensieveTestCase):
+    def shell_client(self, requested: str = "auto", **extra_env: str) -> str:
+        environment = self.env()
+        environment.update(extra_env)
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                'source "$PENSIEVE_SKILL_ROOT/.src/scripts/lib.sh"; pensieve_client "$1" "$PWD"',
+                "pensieve-client-test",
+                requested,
+            ],
+            cwd=str(self.project),
+            env=environment,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+        return result.stdout.strip()
+
     def test_client_detection_and_aliases(self) -> None:
         self.assertEqual(hook_runtime.normalize_client("agent"), "codex")
         self.assertEqual(hook_runtime.normalize_client("agents"), "codex")
-        self.assertEqual(hook_runtime.detect_client("auto", env={"PLUGIN_ROOT": "/plugin"}), "codex")
-        self.assertEqual(
-            hook_runtime.detect_client("auto", env={"CLAUDE_PROJECT_DIR": "/project"}),
-            "claude",
-        )
-        self.assertEqual(hook_runtime.detect_client("auto", env={}, skill_root=Path("/opt/tool")), "generic")
+        self.assertEqual(self.shell_client("agents"), "codex")
+        self.assertEqual(self.shell_client(PLUGIN_ROOT="/plugin"), "codex")
+        self.assertEqual(self.shell_client(CLAUDE_PROJECT_DIR=str(self.project)), "claude")
+        self.assertEqual(self.shell_client(CLAUDE_PLUGIN_ROOT="/plugin"), "claude")
+        self.assertEqual(self.shell_client(CODEX_HOME=str(self.home / ".codex")), "codex")
+        self.assertEqual(self.shell_client(), "generic")
+        self.assertEqual(self.shell_client("both", PLUGIN_ROOT="/plugin"), "both")
         with self.assertRaises(ValueError):
             hook_runtime.normalize_client("unknown")
+
+    def test_codex_native_root_wins_compatibility_alias(self) -> None:
+        self.assertEqual(
+            self.shell_client(
+                PLUGIN_ROOT="/codex/plugin",
+                CLAUDE_PLUGIN_ROOT="/codex/plugin",
+            ),
+            "codex",
+        )
 
     def test_unicode_nested_project_prefers_nearest_pensieve(self) -> None:
         outer = self.project
@@ -179,6 +220,63 @@ class ClientAndPathTests(PensieveTestCase):
         )
         self.assertEqual(Path(result.stdout.strip()), self.project)
 
+    def test_hook_launcher_uses_its_own_installation_without_explicit_root(self) -> None:
+        decoy = self.home / ".claude" / "skills" / "pensieve" / ".src" / "scripts"
+        write_text(decoy / "run-client-hook.py", 'print("WRONG INSTALLATION")\n')
+        environment = self.env()
+        environment.pop("PENSIEVE_SKILL_ROOT", None)
+        result = subprocess.run(
+            [
+                "bash",
+                str(SCRIPTS_ROOT / "run-hook.sh"),
+                "run-client-hook.py",
+                "--client",
+                "codex",
+                "--event",
+                "session-start",
+            ],
+            cwd=str(self.project),
+            env=environment,
+            input=json.dumps({"cwd": str(self.project), "hook_event_name": "SessionStart"}),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+        self.assertEqual(result.stdout, "")
+
+    def test_claude_memory_key_uses_canonical_nested_project_root(self) -> None:
+        stale = self.case_root / "outer-project"
+        stale.mkdir()
+        config_root = self.case_root / "claude-config"
+        environment = self.env()
+        environment.update(
+            {
+                "CLAUDE_PROJECT_DIR": str(stale),
+                "CLAUDE_CONFIG_DIR": str(config_root),
+            }
+        )
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                'source "$PENSIEVE_SKILL_ROOT/.src/scripts/lib.sh"; auto_memory_file "$PWD"',
+            ],
+            cwd=str(self.project),
+            env=environment,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+        encoded = str(self.project)
+        for character in (":", "/", "\\", "_"):
+            encoded = encoded.replace(character, "-")
+        self.assertEqual(
+            Path(result.stdout.strip()),
+            config_root / "projects" / encoded / "memory" / "MEMORY.md",
+        )
+
 
 class HookParityTests(PensieveTestCase):
     def setUp(self) -> None:
@@ -198,17 +296,17 @@ class HookParityTests(PensieveTestCase):
 
     def test_session_start_scenarios(self) -> None:
         # Uninitialized project memory.
-        semantics = hook_runtime.session_semantics(self.project, REPO_ROOT, "1.4.0")
+        semantics = hook_runtime.session_semantics(self.project, "1.4.0")
         self.assertIn("initialization is not recorded", semantics.additional_context)
 
         # Seed-only and healthy: no injection.
         self.marker()
         write_text(self.project / ".pensieve" / "maxims" / "seed.md", "# seed\n")
-        self.assertIsNone(hook_runtime.session_semantics(self.project, REPO_ROOT, "1.4.0"))
+        self.assertIsNone(hook_runtime.session_semantics(self.project, "1.4.0"))
 
         # Existing knowledge and healthy: still no injection.
         write_text(self.project / ".pensieve" / "knowledge" / "api" / "content.md", "# API\n")
-        self.assertIsNone(hook_runtime.session_semantics(self.project, REPO_ROOT, "1.4.0"))
+        self.assertIsNone(hook_runtime.session_semantics(self.project, "1.4.0"))
 
         # Due short-term memory: one concise reminder.
         write_text(
@@ -217,14 +315,13 @@ class HookParityTests(PensieveTestCase):
         )
         due = hook_runtime.session_semantics(
             self.project,
-            REPO_ROOT,
             "1.4.0",
             today=dt.date(2020, 1, 9),
         )
         self.assertIn("1 of 1", due.additional_context)
 
         # A version change invalidates the previous doctor marker.
-        changed = hook_runtime.session_semantics(self.project, REPO_ROOT, "1.5.0")
+        changed = hook_runtime.session_semantics(self.project, "1.5.0")
         self.assertIn("stale for version 1.5.0", changed.additional_context)
 
     def test_paired_session_and_subagent_contexts_are_equal(self) -> None:
@@ -242,12 +339,40 @@ class HookParityTests(PensieveTestCase):
         codex_agent = self.hook("codex", "subagent-start", self.fixture("codex-subagent-start.json"))
         claude_agent_json = json.loads(claude_agent.stdout)
         codex_agent_json = json.loads(codex_agent.stdout)
-        claude_context = claude_agent_json["hookSpecificOutput"]["updatedInput"]["prompt"].split(
-            "\n\n---\n\n", 1
-        )[0]
+        claude_context = claude_agent_json["hookSpecificOutput"]["additionalContext"]
         codex_context = codex_agent_json["hookSpecificOutput"]["additionalContext"]
         self.assertEqual(claude_context, codex_context)
         self.assertLess(len(codex_context.split()), 500)
+
+        legacy = self.hook(
+            "claude",
+            "subagent-start",
+            self.fixture("claude-legacy-pre-tool-use.json"),
+        )
+        legacy_output = json.loads(legacy.stdout)["hookSpecificOutput"]
+        legacy_context = legacy_output["updatedInput"]["prompt"].split("\n\n---\n\n", 1)[0]
+        self.assertEqual(legacy_context, codex_context)
+        self.assertNotIn("permissionDecision", legacy_output)
+
+    def test_hook_uses_payload_cwd_and_ignores_stale_project_environment(self) -> None:
+        self.marker()
+        other = self.case_root / "stale-project"
+        write_json(
+            other / ".pensieve" / ".state" / "pensieve-session-marker.json",
+            {
+                "schema_version": 1,
+                "initialized": False,
+                "skill_version": "1.4.0",
+                "self_check_version": "",
+            },
+        )
+        result = self.hook(
+            "codex",
+            "session-start",
+            self.fixture("codex-session-start.json"),
+            extra_env={"PENSIEVE_PROJECT_ROOT": str(other)},
+        )
+        self.assertEqual(result.stdout, "")
 
     def test_paired_edit_fixtures_resolve_identical_paths(self) -> None:
         claude_payload = self.fixture("claude-post-tool-use.json")
@@ -322,15 +447,93 @@ class HookParityTests(PensieveTestCase):
             )
         )
 
+    def test_codex_patch_paths_are_resolved_from_nested_hook_cwd(self) -> None:
+        nested = self.project / "backend" / "src"
+        nested.mkdir(parents=True)
+        payload = {
+            "tool_name": "apply_patch",
+            "tool_input": {
+                "command": "*** Begin Patch\n*** Update File: ../../.pensieve/knowledge/api/content.md\n*** End Patch"
+            },
+            "tool_response": {"success": True},
+        }
+        semantics = hook_runtime.post_tool_semantics(
+            payload,
+            "codex",
+            cwd=nested,
+            project_root=self.project,
+        )
+        self.assertIsNotNone(semantics)
+        self.assertEqual(semantics.changed_paths, ("knowledge/api/content.md",))
+
     def test_no_project_memory_is_silent(self) -> None:
         shutil.rmtree(str(self.project / ".pensieve"))
         codex = self.hook("codex", "session-start", self.fixture("codex-session-start.json"))
         self.assertEqual(codex.stdout, "")
         claude = self.hook("claude", "subagent-start", self.fixture("claude-subagent-start.json"))
+        self.assertEqual(claude.stdout, "")
+
+
+class InstructionSyncTests(PensieveTestCase):
+    def test_default_codex_target_preserves_other_client_file_mode_and_mtime(self) -> None:
+        self.init("codex")
+        agents = self.project / "AGENTS.md"
+        claude = self.project / "CLAUDE.md"
+        write_text(agents, "# Existing Codex guidance\n")
+        write_text(claude, "# Existing Claude guidance\n")
+        agents.chmod(0o664)
+        claude_before = tree_snapshot(claude.parent)
+
+        first = self.run_script("sync-instructions.sh", "--client", "codex")
+        self.assertIn("AGENTS.md: updated", first.stdout)
+        self.assertIn("pensieve:instructions:start", agents.read_text(encoding="utf-8"))
+        self.assertEqual(agents.stat().st_mode & 0o777, 0o664)
+        self.assertEqual(claude.read_text(encoding="utf-8"), "# Existing Claude guidance\n")
+
+        first_mtime = agents.stat().st_mtime_ns
+        second = self.run_script("sync-instructions.sh", "--client", "codex")
+        self.assertIn("AGENTS.md: unchanged", second.stdout)
+        self.assertEqual(agents.stat().st_mtime_ns, first_mtime)
         self.assertEqual(
-            json.loads(claude.stdout)["hookSpecificOutput"]["permissionDecision"],
-            "allow",
+            [item for item in claude_before if item[0] == "CLAUDE.md"],
+            [item for item in tree_snapshot(claude.parent) if item[0] == "CLAUDE.md"],
         )
+        self.assertFalse((self.home / ".claude").exists())
+
+    def test_empty_existing_target_keeps_mode(self) -> None:
+        self.init("codex")
+        agents = self.project / "AGENTS.md"
+        write_text(agents, "")
+        agents.chmod(0o640)
+        self.run_script("sync-instructions.sh", "--client", "codex")
+        self.assertEqual(agents.stat().st_mode & 0o777, 0o640)
+
+    def test_generic_auto_does_not_create_both_instruction_files(self) -> None:
+        self.init("generic")
+        result = self.run_script("sync-instructions.sh", check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("No instruction targets resolved", result.stderr)
+        self.assertFalse((self.project / "AGENTS.md").exists())
+        self.assertFalse((self.project / "CLAUDE.md").exists())
+
+    def test_atomic_text_update_preserves_existing_permissions(self) -> None:
+        target = self.project / "notes.md"
+        write_text(target, "before\n")
+        target.chmod(0o664)
+        self.assertTrue(hook_runtime.write_text_atomic_if_changed(target, "after\n"))
+        self.assertEqual(target.stat().st_mode & 0o777, 0o664)
+        mtime = target.stat().st_mtime_ns
+        self.assertFalse(hook_runtime.write_text_atomic_if_changed(target, "after\n"))
+        self.assertEqual(target.stat().st_mtime_ns, mtime)
+
+    def test_atomic_text_update_preserves_symbolic_link(self) -> None:
+        target = self.project / "shared" / "AGENTS.md"
+        link = self.project / "AGENTS.md"
+        write_text(target, "before\n")
+        link.symlink_to(target.relative_to(self.project))
+        self.assertTrue(hook_runtime.write_text_atomic_if_changed(link, "after\n"))
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(target.read_text(encoding="utf-8"), "after\n")
 
 
 class DoctorIsolationTests(PensieveTestCase):
@@ -362,6 +565,12 @@ class DoctorIsolationTests(PensieveTestCase):
             check=False,
         )
         self.assertEqual(required.returncode, 3)
+        report = (
+            self.project / ".pensieve" / ".state" / "pensieve-doctor-report.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("into AGENTS.md", report)
+        self.assertNotIn("CLAUDE.md and AGENTS.md", report)
+        self.assertNotIn("MEMORY.md missing/drifted", report)
         self.run_script("sync-instructions.sh", "--client", "codex", "--target", "codex")
         repaired = self.run_script(
             "run-doctor.sh",
@@ -410,6 +619,109 @@ class DoctorIsolationTests(PensieveTestCase):
             )
         )
         self.assertFalse(any(item["id"] == "STR-202" for item in scan["findings"]))
+
+
+class ClaudeIntegrationTests(PensieveTestCase):
+    def test_installer_replaces_legacy_hook_with_native_event_and_is_idempotent(self) -> None:
+        settings_file = self.home / ".claude" / "settings.json"
+        unrelated = {
+            "matcher": "Bash",
+            "hooks": [{"type": "command", "command": "/usr/local/bin/unrelated-hook"}],
+        }
+        unrelated_agent = {
+            "matcher": "Agent",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": "/opt/another-tool/run-client-hook.py --client claude",
+                }
+            ],
+        }
+        legacy = {
+            "matcher": "Agent",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": 'bash "/old/pensieve/run-hook.sh" run-client-hook.py --client claude --event subagent-start',
+                }
+            ],
+        }
+        legacy_session = {
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": 'bash "/old/pensieve/run-hook.sh" pensieve-session-marker.sh --mode session-start',
+                }
+            ]
+        }
+        write_json(
+            settings_file,
+            {
+                "hooks": {
+                    "PreToolUse": [unrelated, unrelated_agent, legacy],
+                    "SessionStart": [legacy_session],
+                },
+                "theme": "dark",
+            },
+        )
+        settings_file.chmod(0o640)
+
+        self.run_script("install-hooks.sh")
+        installed = json.loads(settings_file.read_text(encoding="utf-8"))
+        self.assertEqual(installed["theme"], "dark")
+        self.assertEqual(installed["hooks"]["PreToolUse"], [unrelated, unrelated_agent])
+        self.assertIn("SubagentStart", installed["hooks"])
+        self.assertEqual(installed["hooks"]["SubagentStart"][0]["matcher"], "Explore|Plan")
+        self.assertEqual(
+            installed["hooks"]["SessionStart"][0]["matcher"],
+            "startup|resume|clear|compact",
+        )
+        self.assertEqual(len(installed["hooks"]["SessionStart"]), 1)
+        self.assertTrue(installed["hooks"]["PostToolUse"][0]["hooks"][0]["async"])
+        self.assertEqual(settings_file.stat().st_mode & 0o777, 0o640)
+
+        mtime = settings_file.stat().st_mtime_ns
+        second = self.run_script("install-hooks.sh")
+        self.assertIn("already up to date", second.stdout)
+        self.assertEqual(settings_file.stat().st_mtime_ns, mtime)
+
+    def test_installer_honors_claude_config_dir(self) -> None:
+        config_root = self.case_root / "custom-claude-config"
+        self.run_script(
+            "install-hooks.sh",
+            extra_env={"CLAUDE_CONFIG_DIR": str(config_root)},
+        )
+        self.assertTrue((config_root / "settings.json").is_file())
+        self.assertFalse((self.home / ".claude" / "settings.json").exists())
+
+        self.run_script(
+            "init-project-data.sh",
+            "--client",
+            "claude",
+            extra_env={"CLAUDE_CONFIG_DIR": str(config_root)},
+        )
+        memory_files = list((config_root / "projects").rglob("MEMORY.md"))
+        self.assertEqual(len(memory_files), 1)
+        self.assertFalse((self.home / ".claude" / "projects").exists())
+
+    def test_invalid_settings_shape_is_preserved(self) -> None:
+        settings_file = self.home / ".claude" / "settings.json"
+        write_text(settings_file, "[]\n")
+        before = tree_snapshot(self.home)
+        result = self.run_script("install-hooks.sh", check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(tree_snapshot(self.home), before)
+
+    def test_claude_agent_template_is_self_contained_and_has_no_second_memory_authority(self) -> None:
+        template = (REPO_ROOT / ".src" / "templates" / "agents" / "pensieve-wand.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("${PENSIEVE_SKILL_ROOT}", template)
+        self.assertNotIn("\nmemory:", template)
+        self.assertIn("at most five", template)
+        self.assertIn("at most two", template)
+        self.assertIn("at most ten", template)
+        self.assertIn("only knowledge authority", template)
 
 
 class MigrationSafetyTests(PensieveTestCase):
@@ -472,6 +784,28 @@ class MigrationSafetyTests(PensieveTestCase):
         self.assertEqual(len(backed_up_unknown), 1)
         self.assertEqual(backed_up_unknown[0].read_text(encoding="utf-8"), "unknown\n")
 
+    def test_multiple_legacy_conflicts_get_unique_non_overwriting_files(self) -> None:
+        self.init("codex")
+        target = self.project / ".pensieve" / "knowledge" / "shared.md"
+        write_text(target, "current\n")
+        write_text(
+            self.project / ".claude" / "skills" / "pensieve" / "knowledge" / "shared.md",
+            "from-claude\n",
+        )
+        write_text(
+            self.project / ".agents" / "skills" / "pensieve" / "knowledge" / "shared.md",
+            "from-agents\n",
+        )
+
+        self.run_script("run-migrate.sh", "--client", "codex")
+        conflicts = sorted(target.parent.glob("shared.migrated.*.md"))
+        self.assertEqual(len(conflicts), 2)
+        self.assertEqual(
+            {path.read_text(encoding="utf-8") for path in conflicts},
+            {"from-claude\n", "from-agents\n"},
+        )
+        self.assertEqual(target.read_text(encoding="utf-8"), "current\n")
+
 
 class UpgradeSafetyTests(PensieveTestCase):
     def git(self, cwd: Path, *arguments: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -490,8 +824,55 @@ class UpgradeSafetyTests(PensieveTestCase):
         self.git(path, "config", "user.name", "Pensieve Tests")
         self.git(path, "config", "user.email", "pensieve-tests@example.invalid")
         write_json(path / ".src" / "manifest.json", {"name": "pensieve", "version": "1.4.0"})
+        write_json(path / ".src" / "core" / "schema.json", {"schema_version": 2})
+        write_text(path / ".src" / "scripts" / "run-upgrade.sh", "#!/bin/bash\n")
+        write_text(path / "SKILL.md", "---\nname: pensieve\n---\n")
         self.git(path, "add", ".")
         self.git(path, "commit", "-m", "initial")
+
+    def test_clean_unrelated_repo_and_nested_checkout_are_rejected(self) -> None:
+        unrelated = self.case_root / "unrelated"
+        unrelated.mkdir()
+        self.git(unrelated, "init", "-b", "main")
+        self.git(unrelated, "config", "user.name", "Pensieve Tests")
+        self.git(unrelated, "config", "user.email", "pensieve-tests@example.invalid")
+        write_json(unrelated / ".src" / "manifest.json", {"name": "another-tool", "version": "1.4.0"})
+        self.git(unrelated, "add", ".")
+        self.git(unrelated, "commit", "-m", "unrelated")
+        result = self.run_script(
+            "run-upgrade.sh",
+            "--client",
+            "codex",
+            "--source-root",
+            str(unrelated),
+            check=False,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unrecognized checkout", result.stderr)
+
+        parent = self.case_root / "parent-repo"
+        child = parent / "nested-pensieve"
+        parent.mkdir()
+        self.git(parent, "init", "-b", "main")
+        self.git(parent, "config", "user.name", "Pensieve Tests")
+        self.git(parent, "config", "user.email", "pensieve-tests@example.invalid")
+        write_json(child / ".src" / "manifest.json", {"name": "pensieve", "version": "1.4.0"})
+        write_json(child / ".src" / "core" / "schema.json", {"schema_version": 2})
+        write_text(child / ".src" / "scripts" / "run-upgrade.sh", "#!/bin/bash\n")
+        write_text(child / "SKILL.md", "---\nname: pensieve\n---\n")
+        self.git(parent, "add", ".")
+        self.git(parent, "commit", "-m", "nested")
+        result = self.run_script(
+            "run-upgrade.sh",
+            "--client",
+            "codex",
+            "--source-root",
+            str(child),
+            check=False,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("subdirectory of another Git repository", result.stderr)
+        self.assertFalse((self.project / ".pensieve").exists())
 
     def test_non_git_and_dirty_checkout_stop_before_project_writes(self) -> None:
         non_git = self.case_root / "not-git"
@@ -687,11 +1068,18 @@ class ConcurrentStateTests(PensieveTestCase):
 class PluginShapeTests(unittest.TestCase):
     def test_native_plugin_shape_and_default_hook_discovery(self) -> None:
         manifest = json.loads((REPO_ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        shared_manifest = json.loads((REPO_ROOT / ".src" / "manifest.json").read_text(encoding="utf-8"))
         hooks = json.loads((REPO_ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["version"], "1.4.0")
+        self.assertEqual(manifest["version"], shared_manifest["version"])
         self.assertEqual(manifest["skills"], "./skills/")
         self.assertNotIn("hooks", manifest)
         self.assertEqual(set(hooks["hooks"]), {"SessionStart", "SubagentStart", "PostToolUse"})
+        self.assertEqual(
+            hooks["hooks"]["SessionStart"][0]["matcher"],
+            "startup|resume|clear|compact",
+        )
+        self.assertTrue(hooks["hooks"]["PostToolUse"][0]["hooks"][0]["async"])
         serialized = json.dumps(hooks)
         self.assertIn("$PLUGIN_ROOT", serialized)
         self.assertTrue((REPO_ROOT / "skills" / "pensieve" / "SKILL.md").is_file())
