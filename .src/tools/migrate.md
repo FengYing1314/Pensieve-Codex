@@ -1,5 +1,5 @@
 ---
-description: Migration tool. Automatically migrates legacy user data to the v2 directory structure and aligns critical seed files. Does not perform version upgrades or doctor grading.
+description: Migration tool. Copies legacy user data into the current structure without overwriting project-owned seeds. Legacy cleanup is separate, explicit, and backup-gated.
 ---
 
 # Migrate Tool
@@ -9,21 +9,29 @@ description: Migration tool. Automatically migrates legacy user data to the v2 d
 ## Use when
 
 - Migrating from v1 (project-level install) to v2 (user-level system + project-level data)
-- Doctor reports critical file missing or critical file drift
-- Need to fill in directory structure or re-align seed files
+- Doctor reports a missing default seed
+- Need to fill in directory structure without replacing customized files
 
-Critical pipeline seeds are sourced from `.src/templates/pipelines/run-when-*.md`; the migration script only keeps compatibility with historical `pipeline.run-when-*` names when reading old user data.
+Default seeds are copied only when missing. A content difference is treated as project customization, not drift. Historical `pipeline.run-when-*` names are normalized only while copying legacy data.
 
 ## Standard execution
 
-> All `.src/` paths below are relative to the skill root (`$PENSIEVE_SKILL_ROOT`, typically `~/.claude/skills/pensieve/`).
+Set `PENSIEVE_SKILL_ROOT` to the checkout or plugin root.
 
 ```bash
-bash "${PENSIEVE_SKILL_ROOT:-$HOME/.claude/skills/pensieve}/.src/scripts/run-migrate.sh"
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-migrate.sh" --client auto
 ```
 
 Optional dry-run:
 
 ```bash
-bash "${PENSIEVE_SKILL_ROOT:-$HOME/.claude/skills/pensieve}/.src/scripts/run-migrate.sh" --dry-run
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-migrate.sh" --client auto --dry-run
 ```
+
+Dry-run performs zero writes. Normal migration copies and reports but retains every legacy path. Only use cleanup after reviewing the plan:
+
+```bash
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-migrate.sh" --client auto --cleanup-legacy
+```
+
+Cleanup starts only after every legacy path, including unknown files, has a complete verified backup. A backup failure stops before deletion.

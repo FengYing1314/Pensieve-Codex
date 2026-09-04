@@ -2,7 +2,7 @@
 
 # Pensieve
 
-**Give your AI agent a continuously growing project memory.**
+**A project knowledge base and workflow router for Codex, Claude Code, and skill-capable agents.**
 
 [![GitHub Stars](https://img.shields.io/github/stars/kingkongshot/Pensieve?color=ffcb47&labelColor=black&style=flat-square)](https://github.com/kingkongshot/Pensieve/stargazers)
 [![License](https://img.shields.io/badge/license-MIT-white?labelColor=black&style=flat-square)](LICENSE)
@@ -11,292 +11,222 @@
 
 </div>
 
-**In one sentence: Pensieve is a self-growing CLAUDE.md that runs as a skill -- minimal context usage, compatible with all AI tools that support skills.**
+Pensieve keeps project-owned memory in `.pensieve/` and loads only the relevant parts for a task. Knowledge, settled decisions, engineering maxims, reusable pipelines, and short-term conclusions remain independent of the client that uses them.
 
-| | CLAUDE.md / agents.md | Pensieve |
-|---|---|---|
-| Form | Single static file | Four-layer structured knowledge |
-| Maintenance | Manual writing, manual updates | Auto-accumulation, auto-alignment |
-| Scope | Project conventions | Conventions + decisions + facts + workflows |
-| Linking | Flat | Semantic links forming a knowledge graph |
-| Context usage | Full-text injection | Skill-based on-demand routing, minimal usage |
+## Why use it
 
-## Why Use Pensieve
-
-| Without | With |
+| Without Pensieve | With Pensieve |
 |---|---|
-| Have to re-explain project specs every time | Specs stored as maxims, loaded automatically |
-| Code review standards depend on mood | Review standards solidified into executable pipelines |
-| Repeat last week's mistake this week | Lessons auto-accumulated, skipped next time |
-| Forget why you designed it this way three months later | Decisions record context and alternatives |
-| Have to re-read docs to locate module boundaries every time | Knowledge caches exploration results, reuse directly |
+| Re-explain project boundaries each session | Reuse cached locations, call chains, and module boundaries |
+| Revisit settled trade-offs | Read active decisions and maxims before changing code |
+| Reconstruct commit/review/refactor procedures | Follow executable project pipelines |
+| Lose useful conclusions in chat history | Stage them in `short-term/`, then refine or promote them |
+| Inject one large instruction file | Route to a small set of relevant entries on demand |
 
-## Self-Reinforcing Loop
+## Knowledge model
 
-Pensieve doesn't just store documentation -- it makes every agent conversation more precise:
+| Layer | Meaning | Answers |
+|---|---|---|
+| `maxims/` | MUST | Which engineering rules must not be violated? |
+| `decisions/` | WANT | Why was this project trade-off selected? |
+| `pipelines/` | HOW | How should a recurring workflow run? |
+| `knowledge/` | IS | What verified facts, paths, and call chains are known? |
+| `short-term/` | STAGING | Which new conclusions still need triage? |
 
-- **Validate AI-generated plans** -- `"Use pensieve to check the accuracy of this plan"` -> Automatically cross-references maxims and decisions; plans that violate architectural conventions are intercepted before execution
-- **Narrow the exploration scope** -- `"Use pensieve to locate the entry point of the payment module"` -> Knowledge contains previous exploration results, reuse directly without global search, saving tokens and time
-- **Establish implicit connections** -- `"Use pensieve to analyze which workflows this refactoring will affect"` -> Four-layer knowledge forms a graph through semantic links, following association chains to discover design intent and dependencies
-- **Reduce repeated confirmations** -- `"Use pensieve conventions to commit code"` -> Conventions and decisions are already accumulated, no more asking "what style?" or "where's the boundary?"
-
-You don't need to manually maintain the knowledge base -- daily development feeds it automatically:
-
-```
-    Develop --> Commit --> Review (pipeline)
-     ^                      |
-     |   <-- Auto-accumulate experience <--   |
-     |                      v
-     +-- maxim / decision / knowledge / pipeline
-```
-
-- **During editing**: After Write/Edit, the knowledge graph syncs automatically (Claude Code triggers via hooks; other clients can manually run `self-improve`)
-- **During review**: Executes according to project pipelines, conclusions flow back as knowledge
-- **During retrospective**: `"Use pensieve to accumulate this experience"` -> Insights are written to the corresponding layer
-
-You steer the direction, Pensieve helps you avoid pitfalls.
-
-## Four-Layer Knowledge Model
-
-| Layer | Type | What It Answers | Cross-project? |
-|---|---|---|---|
-| **MUST** | maxim | What must never be violated? | Yes -- holds across projects and languages |
-| **WANT** | decision | Why was this approach chosen? | No -- active trade-offs for the current project |
-| **HOW** | pipeline | How should this workflow run? | Depends |
-| **IS** | knowledge | What are the current facts? | No -- verifiable system facts |
-
-Layers are connected through three types of semantic links: `based-on / leads-to / related`. As usage accumulates, Pensieve automatically builds a directed graph of project knowledge:
+Entries can link through `based-on`, `leads-to`, and `related`. Pensieve generates a project graph without copying the full graph into model context.
 
 <img src="docs/graph-overview.png" width="100%" alt="Pensieve knowledge graph overview" />
 <img src="docs/graph-detail.png" width="100%" alt="Pensieve knowledge graph detail" />
 
-See the detailed specifications under `.src/references/`: [maxims.md](.src/references/maxims.md), [decisions.md](.src/references/decisions.md), [knowledge.md](.src/references/knowledge.md), [pipelines.md](.src/references/pipelines.md).
+## Seven tools
 
-## Five Tools
+| Tool | Purpose |
+|---|---|
+| `init` | Create `.pensieve/` and install missing default seeds without overwriting existing data |
+| `upgrade` | Update a clean source checkout with `git pull --ff-only` |
+| `migrate` | Copy legacy data safely and optionally clean verified backups |
+| `doctor` | Check project data and the selected client integration |
+| `self-improve` | Capture reusable evidence-backed conclusions |
+| `refine` | Triage, merge, promote, or remove staged knowledge |
+| `sync-instructions` | Add compact routes to `AGENTS.md` and/or `CLAUDE.md` |
 
-| Tool | What It Does | Trigger Example |
-|---|---|---|
-| `init` | Create data directory, seed default content | "Initialize pensieve for me" |
-| `upgrade` | Refresh skill source code | "Upgrade pensieve" |
-| `migrate` | Migrate legacy data, align seed files | "Migrate to v2" |
-| `doctor` | Read-only scan, check structure and format | "Check if the data has any issues" |
-| `self-improve` | Extract insights from conversations and diffs, write to four-layer knowledge | "Accumulate this experience" |
+Detailed contracts live in [`.src/tools/`](.src/tools/) and [tool-boundaries.md](.src/references/tool-boundaries.md).
 
-Tool boundaries and redirection rules: [tool-boundaries.md](.src/references/tool-boundaries.md).
+## Codex and Claude Code parity
 
-## Looking for the Linus Prompt?
+The two clients use different native lifecycle events, but they share one semantic engine and the same `.pensieve/` format.
 
-Pensieve was initially known for a Linus Torvalds-style guiding prompt -- using "good taste", "don't break userspace", and "paranoid about simplicity" to constrain agent behavior.
+The packaging follows OpenAI's [Claude plugin migration guidance](https://developers.openai.com/plugins/guides/submit-claude-plugin), and the lifecycle adapter follows the current [Codex Hooks contract](https://learn.chatgpt.com/docs/hooks).
 
-That engineering philosophy is still at the core of Pensieve, but it's no longer an isolated prompt. It's now built in as executable principles, so the agent has "good taste" from day one:
+| Purpose | Claude Code | Codex | Shared result |
+|---|---|---|---|
+| Skill entry | Root `SKILL.md` | `skills/pensieve` | Same seven tool specifications under `.src/` |
+| Session reminder | `SessionStart` | `SessionStart` | Same health/version/short-term decision |
+| Subagent recall | `PreToolUse Agent` | `SubagentStart` + `pensieve-wand` | Same compact recall guidance |
+| Edit synchronization | `Write/Edit/MultiEdit` file paths | `apply_patch` command paths | Same five data directories and state refresh |
+| Instruction entry | `CLAUDE.md` + optional `MEMORY.md` | `AGENTS.md` + native Skill | Client-specific files never leak across modes |
+| Hooks unavailable | Manual tools | Manual tools | Core workflow remains complete |
 
-| Type | Built-in Content | Effect |
-|---|---|---|
-| maxim | 4 Linus-style engineering principles | Agent avoids patchy code, simplifies before extending, and preserves existing behavior |
-| pipeline | Commit + code review + refactor | Every commit, review, and refactor checks against the standards and feeds conclusions back into knowledge |
-| knowledge | Code-taste review standard | "Good code" becomes executable |
-
-Try it: `"Use pensieve to review the code taste of recent commits"` or `"Use pensieve to commit local changes"`.
+Healthy projects with no due short-term entries receive no session context. Projects without `.pensieve/` are ignored silently. Hook context is capped at 500 tokens.
 
 ## Installation
 
-Prerequisites: `git`, `bash`, `Python 3.8+`.
+Prerequisites: `git`, `bash`, and Python 3.8+.
 
-<details>
-<summary><b>Claude Code</b></summary>
+### Codex native plugin
+
+Clone this branch as the source checkout used by a personal marketplace:
 
 ```bash
-# 1. Global install (one-time only)
-git clone -b main https://github.com/kingkongshot/Pensieve.git ~/.claude/skills/pensieve
+git clone -b feat/codex-native-plugin https://github.com/FengYing1314/Pensieve.git "$HOME/plugins/pensieve"
+```
 
-# 2. Install hooks (recommended; auto-syncs knowledge graph after edits, auto-checks status on session start)
-bash ~/.claude/skills/pensieve/.src/scripts/install-hooks.sh
+Add this entry to `~/.agents/plugins/marketplace.json` while preserving any existing entries:
 
-# 3. Initialize in your project
+```json
+{
+  "name": "personal",
+  "interface": {"displayName": "Personal"},
+  "plugins": [
+    {
+      "name": "pensieve",
+      "source": {"source": "local", "path": "./plugins/pensieve"},
+      "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
+      "category": "Productivity"
+    }
+  ]
+}
+```
+
+Install and verify discovery:
+
+```bash
+codex plugin add pensieve@personal
+codex plugin list
+```
+
+Start a new Codex task, open `/hooks`, review the bundled definitions, and trust them if they match this checkout. Pensieve does not bypass Codex hook trust. The plugin remains usable through `$pensieve` while hooks are untrusted or disabled.
+
+Initialize a project through `$pensieve init`, or run the shared script directly:
+
+```bash
 cd <your-project>
-bash ~/.claude/skills/pensieve/.src/scripts/init-project-data.sh
+PENSIEVE_CLIENT=codex PENSIEVE_SKILL_ROOT="$HOME/plugins/pensieve" \
+  bash "$HOME/plugins/pensieve/.src/scripts/init-project-data.sh" --client codex
 ```
 
-</details>
+### Claude Code skill
 
-<details>
-<summary><b>Other Clients (Cursor / General Agents, etc.)</b></summary>
-
-Replace `<skill-path>` with the skill directory for your client (e.g., `~/.cursor/skills/pensieve`).
+The root Skill entry and historical Hook script paths remain compatible:
 
 ```bash
-# 1. Global install (one-time only)
-git clone -b main https://github.com/kingkongshot/Pensieve.git <skill-path>
+git clone -b feat/codex-native-plugin https://github.com/FengYing1314/Pensieve.git "$HOME/.claude/skills/pensieve"
+bash "$HOME/.claude/skills/pensieve/.src/scripts/install-hooks.sh"
 
-# 2. Initialize in your project
 cd <your-project>
-bash <skill-path>/.src/scripts/init-project-data.sh
+bash "$HOME/.claude/skills/pensieve/.src/scripts/init-project-data.sh" --client claude
 ```
 
-</details>
+### Generic skill-capable clients
 
-System code is installed globally once; user data is stored per project in `<project>/.pensieve/`. Multiple projects share the same system code, each maintaining independent project knowledge.
+Clone to the client-specific skill directory, set `PENSIEVE_SKILL_ROOT`, and pass `--client generic`. Hooks are optional; run state maintenance manually after edits.
 
-<details>
-<summary><b>AI Agent Auto-Install Reference</b></summary>
+## Client isolation
 
-When a user asks an AI agent to install Pensieve, the agent should follow this decision flow. Below, `SKILL_PATH` refers to the client-specific installation path (e.g., `~/.claude/skills/pensieve`).
+Commands accept `--client auto|codex|claude|both|generic`. `agents` and `agent` remain compatibility aliases for `codex` where an instruction target is accepted.
 
-**Step 1: Check global installation status**
+- `codex` reads or writes `AGENTS.md` integration only and never creates Claude `MEMORY.md`.
+- `claude` reads or writes `CLAUDE.md` and Claude project memory only; it does not require `AGENTS.md`.
+- `both` explicitly enables both integrations.
+- `generic` checks only provider-neutral project data.
+- `auto` uses Hook-provided identity, client environment variables, and the installation path; it never silently chooses `both`.
+
+Doctor reports missing client integration as `SHOULD_FIX` by default. Use `--require-integration` when CI or rollout policy requires it to fail:
 
 ```bash
-SKILL_PATH="$HOME/.claude/skills/pensieve"  # Adjust per client
-
-if [[ -d "$SKILL_PATH/.src" ]]; then
-    echo "Pensieve is already globally installed, skipping clone"
-else
-    SKILL_PARENT="$(dirname "$SKILL_PATH")"
-    # Check if parent directory is a git repo (some users sync configs with git)
-    if git -C "$SKILL_PARENT/.." rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        git -C "$SKILL_PARENT/.." submodule add -b main https://github.com/kingkongshot/Pensieve.git "skills/pensieve"
-    else
-        git clone -b main https://github.com/kingkongshot/Pensieve.git "$SKILL_PATH"
-    fi
-    # Hooks are a Claude Code-specific feature; other clients skip this step
-    # bash "$SKILL_PATH/.src/scripts/install-hooks.sh"
-fi
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-doctor.sh" --client codex --strict
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-doctor.sh" --client codex --strict --require-integration
 ```
 
-**Step 2: Determine whether to run project initialization**
+Use `sync-instructions` to repair only the relevant instruction file:
 
 ```bash
-# If the current directory is the skill's parent config directory, don't auto-initialize project data
-CURRENT_DIR="$(pwd)"
-CONFIG_DIR="$(cd "$(dirname "$SKILL_PATH")/.." 2>/dev/null && pwd)"
-if [[ "$CURRENT_DIR" == "$CONFIG_DIR" ]]; then
-    echo "Current directory is the config directory, skipping project initialization. If you need to use Pensieve here, please specify explicitly."
-    exit 0
-fi
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/sync-instructions.sh" --client codex --target codex
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/sync-instructions.sh" --client claude --target claude
 ```
 
-**Step 3: Check for legacy data and initialize**
+## Safe migration
+
+Migration copies legacy files and reports conflicts by default. Existing seeds are project-owned and are never replaced merely because they differ from bundled templates. Legacy files, including unknown files, remain in place.
 
 ```bash
-HAS_LEGACY=0
-for legacy_dir in .claude/skills/pensieve .agents/skills/pensieve skills/pensieve .claude/pensieve; do
-    if [[ -d "$legacy_dir" ]] && [[ -d "$legacy_dir/maxims" || -d "$legacy_dir/decisions" || -d "$legacy_dir/knowledge" || -d "$legacy_dir/pipelines" ]]; then
-        HAS_LEGACY=1
-        break
-    fi
-done
+# Preview with zero filesystem writes
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-migrate.sh" --client codex --dry-run
 
-if [[ "$HAS_LEGACY" -eq 1 ]]; then
-    echo "Legacy Pensieve user data detected. Migrate to v2?"
-    bash "$SKILL_PATH/.src/scripts/init-project-data.sh"
-    bash "$SKILL_PATH/.src/scripts/run-migrate.sh"
-    bash "$SKILL_PATH/.src/scripts/run-doctor.sh" --strict
-elif [[ -d .pensieve ]]; then
-    echo "Pensieve is already initialized in the current project"
-else
-    bash "$SKILL_PATH/.src/scripts/init-project-data.sh"
-fi
+# Copy data; keep legacy locations
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-migrate.sh" --client codex
+
+# Optional cleanup: back up every legacy location, verify the copy, then delete
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-migrate.sh" --client codex --cleanup-legacy
 ```
 
-> **Key takeaway**: Check global install first -> Determine if parent directory is a git repo to decide clone/submodule -> Skip project initialization for config directories -> Check for legacy data to decide init/migrate.
+If any backup fails verification, cleanup stops before deleting legacy data.
 
-</details>
+## Safe upgrades
 
-<details>
-<summary><b>Updating</b></summary>
+The upgrade tool requires a clean Git checkout and only runs `git pull --ff-only`. Dirty, non-Git, and non-fast-forward states stop safely; it never resets or rewrites local history.
 
 ```bash
-# Update system code (one operation, all projects take effect)
-cd <skill-path>
-git pull --ff-only || { git fetch origin && git reset --hard "origin/$(git rev-parse --abbrev-ref HEAD)"; }
-
-# Health check in your project (optional but recommended)
-cd <your-project>
-bash <skill-path>/.src/scripts/run-doctor.sh --strict
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-upgrade.sh" --client claude
 ```
 
-`git pull --ff-only` works for normal updates. If the remote branch was force-pushed (e.g., after a squash and republish), ff-only will fail, and `fetch + reset` will sync local to the latest remote state. This is safe -- the skill directory only contains tracked system files; user data is in `<project>/.pensieve/` and won't be overwritten.
-
-Full installation, update, reinstall, and uninstall instructions: [skill-lifecycle.md](.src/references/skill-lifecycle.md).
-
-</details>
-
-<details>
-<summary><b>Upgrading from Legacy Versions</b></summary>
-
-If your Pensieve was installed at project level (code in `<project>/.claude/skills/pensieve/`), or installed via `claude plugin install`, you need to migrate to the v2 architecture:
+An installed Codex plugin snapshot is not updated in place. Update its source checkout, reinstall from the configured marketplace, then start a new task:
 
 ```bash
-# 1. Global install system code (if not already installed)
-if [[ ! -d <skill-path> ]]; then
-    git clone -b main https://github.com/kingkongshot/Pensieve.git <skill-path>
-fi
-
-# 2. Install hooks (Claude Code only; other clients skip this)
-# bash <skill-path>/.src/scripts/install-hooks.sh
-
-# 3. Run migration in each project
-cd <your-project>
-bash <skill-path>/.src/scripts/init-project-data.sh
-bash <skill-path>/.src/scripts/run-migrate.sh
-bash <skill-path>/.src/scripts/run-doctor.sh --strict
-
-# 4. Uninstall old plugin (if applicable, Claude Code only)
-# claude plugin uninstall pensieve 2>/dev/null || true
+PENSIEVE_SKILL_ROOT="<installed-plugin-root>" \
+  bash "<installed-plugin-root>/.src/scripts/run-upgrade.sh" \
+  --client codex --source-root "$HOME/plugins/pensieve"
+codex plugin add pensieve@personal
 ```
 
-`run-migrate.sh` will automatically move user data (`maxims/`, `decisions/`, `knowledge/`, `pipelines/`) from legacy paths into `<project>/.pensieve/`, runtime state from `<project>/.state/` into `<project>/.pensieve/.state/`, clean up old graph files and README copies, then delete the legacy directories.
-
-</details>
-
-<details>
-<summary><b>Architecture Details</b></summary>
-
-### Directory Structure
+## Architecture
 
 ```text
-~/.claude/skills/pensieve/          # User-level (single global install)
-├── SKILL.md                        #   Static routing file (tracked)
-├── .src/                           #   System code, templates, references, core engine
-│   ├── core/
-│   ├── scripts/
-│   ├── templates/
-│   │   ├── agents/
-│   │   ├── knowledge/
-│   │   ├── maxims/
-│   │   └── pipelines/
-│   ├── references/
-│   └── tools/
-└── agents/                         #   agent/UI metadata
+Pensieve/
+├── .codex-plugin/plugin.json       # Codex native manifest
+├── hooks/hooks.json                # Codex default-discovered lifecycle hooks
+├── skills/
+│   ├── pensieve/                   # Thin seven-tool Codex router
+│   └── pensieve-wand/              # Thin Codex recall skill
+├── SKILL.md                        # Preserved Claude/general Skill entry
+├── .src/                           # One shared implementation and specification source
+└── .codex/skills/pensieve-sync-to-main/
+                                     # Repository-maintenance skill; not a user runtime entry
 
-<project>/.codex/skills/            # Project-level Codex skill (only for maintaining this repository)
-└── pensieve-sync-to-main/
-    ├── SKILL.md
-    └── agents/
-        └── openai.yaml
-
-<project>/.pensieve/                # Project-level (per-project, can be version-controlled)
-├── maxims/                         #   Engineering principles
-├── decisions/                      #   Architectural decisions
-├── knowledge/                      #   Cached exploration results
-├── pipelines/                      #   Reusable workflows
-├── state.md                        #   Dynamic: lifecycle state + knowledge graph
-└── .state/                         #   Runtime artifacts (gitignored)
+<project>/.pensieve/
+├── maxims/
+├── decisions/
+├── knowledge/
+├── pipelines/
+├── short-term/{maxims,decisions,knowledge,pipelines}/
+├── state.md                        # Atomically updated only when content changes
+└── .state/                         # Reports, marker, lock, and generated graph (gitignored)
 ```
 
-`.src/manifest.json` is the anchor for the skill root directory -- scripts locate all paths through it.
+Concurrent Hook updates serialize through a project lock. `state.md`, marker JSON, reports, and the knowledge graph use temporary-file replacement so interrupted or overlapping Hook processes cannot leave partial content.
 
-### Design Principles
+## Verification
 
-- **Physical isolation of system code and user data** -- System code lives in `~/.claude/skills/pensieve/`, user data in `<project>/.pensieve/`; `git pull` to update the system can never touch project data
-- **Single source of truth for rules** -- Directories, key files, and migration paths are all defined in `.src/core/schema.json`
-- **Confirm before executing** -- When scope is unclear, ask first; don't auto-launch long workflows
-- **Read specs before writing data** -- Before creating any user data, read the format specifications in `.src/references/`
+```bash
+bash -n .src/scripts/*.sh
+python3 -m unittest discover -s .src/tests -p 'test_*.py' -v
+python3 /path/to/plugin-creator/scripts/validate_plugin.py .
+python3 /path/to/skill-creator/scripts/quick_validate.py skills/pensieve
+python3 /path/to/skill-creator/scripts/quick_validate.py skills/pensieve-wand
+git diff --check
+```
 
-</details>
-
-## Community
-
-<img src="docs/QRCode.png" width="200" alt="QR Code" />
+The test suite uses only the Python standard library and replays paired Claude/Codex Hook fixtures. A live Claude Code binary is not required for contract testing.
 
 ## License
 

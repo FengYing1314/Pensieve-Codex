@@ -1,5 +1,33 @@
 # Changelog
 
+## v1.4.0 — Codex Native Plugin and Cross-Client Parity
+
+### Added
+
+- Native Codex plugin manifest at `.codex-plugin/plugin.json`
+- Default-discovered Codex lifecycle hooks for `SessionStart`, `SubagentStart`, and `PostToolUse Edit|Write`
+- Thin Codex skills `pensieve` and `pensieve-wand`, both backed by the root `.src` implementation
+- Shared Hook semantic engine and paired Claude/Codex contract fixtures
+- `PENSIEVE_CLIENT=auto|codex|claude|both|generic` with `agent` / `agents` Codex aliases
+- `doctor --require-integration`, `migrate --cleanup-legacy`, and `sync-instructions --target codex`
+- Standard-library tests and a Python 3.8/3.12 GitHub Actions matrix
+
+### Changed
+
+- Healthy sessions with no due short-term entries inject no context; all Hook guidance remains below 500 tokens
+- Codex updates only Codex integration state and never creates Claude `MEMORY.md`
+- Doctor grades selected-client integration as `SHOULD_FIX` unless explicitly required
+- Bundled seeds become project-owned after creation; customization is not treated as corruption
+- State, marker, reports, and graph outputs use atomic replacement; Hook-driven state maintenance is serialized
+- Project detection prefers the nearest `.pensieve/` and supports non-Git projects and Unicode paths
+
+### Safety
+
+- Migration copies and reports by default; legacy deletion requires `--cleanup-legacy` and a fully verified backup
+- Migration dry-run performs zero writes
+- Upgrade refuses dirty/non-Git checkouts and only uses `git pull --ff-only`; hard-reset fallback was removed
+- Installed Codex snapshots direct upgrades to a clean source checkout followed by marketplace reinstallation
+
 ## v2.0.0 — User-Level System + Project-Level Data
 
 ### Motivation

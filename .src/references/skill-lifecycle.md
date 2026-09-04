@@ -4,131 +4,107 @@ type: knowledge
 title: Pensieve Installation and Updates
 status: active
 created: 2026-03-06
-updated: 2026-03-10
-tags: [pensieve, install, update, operations]
+updated: 2026-09-04
+tags: [pensieve, install, update, operations, codex, claude]
 ---
 
 # Pensieve Installation and Updates
 
-When the user asks how to install, initialize, update, reinstall, or uninstall Pensieve itself, read this file first.
+Read this file before installing, initializing, updating, reinstalling, or uninstalling Pensieve.
 
-## Installation
+## Client layouts
 
-### Step 1: Install system code (global, one-time)
+- Codex source checkout: a clean Git clone, commonly `$HOME/plugins/pensieve`
+- Codex installed runtime: a marketplace-managed snapshot containing `.codex-plugin/`, `hooks/`, `skills/`, and `.src/`
+- Claude Code skill: a clean Git clone, commonly `$HOME/.claude/skills/pensieve`
+- Project data for every client: `<project>/.pensieve/`
 
-Clone the repository to the user-level skill directory:
+The source/runtime location is replaceable. Project data is not: treat `.pensieve/` as user-owned data and never delete it during installation or upgrade.
 
-```bash
-# English users
-git clone -b main https://github.com/kingkongshot/Pensieve.git ~/.claude/skills/pensieve
+## Codex installation
 
-# Chinese users
-git clone -b zh https://github.com/kingkongshot/Pensieve.git ~/.claude/skills/pensieve
-```
+1. Clone the source repository.
+2. Register its local path in a personal marketplace entry.
+3. Run `codex plugin add pensieve@<marketplace>`.
+4. Start a new task and review `/hooks`. Trust only the expected `SessionStart`, `SubagentStart`, and `PostToolUse Edit|Write` commands.
+5. Invoke `$pensieve init`, or run `init-project-data.sh --client codex` from the source checkout.
 
-Notes:
+Codex discovers the plugin's `hooks/hooks.json` by default. Hooks are optional: all seven tools remain available through `skills/pensieve` without Hook execution.
 
-- System files (`.src/`, `agents/`, `SKILL.md`) are tracked by git
-- `SKILL.md` is a static, tracked file — the skill interface declaration
-- A single installation serves all projects
-
-### Step 2: Install hooks (global, one-time)
-
-```bash
-bash ~/.claude/skills/pensieve/.src/scripts/install-hooks.sh
-```
-
-This writes hook configuration to `~/.claude/settings.json`. Hooks automatically apply to all projects. Projects without `.pensieve/` are unaffected (hooks exit silently).
-
-### Step 3: Initialize project data (per project)
+## Claude Code installation
 
 ```bash
+git clone -b feat/codex-native-plugin https://github.com/FengYing1314/Pensieve.git "$HOME/.claude/skills/pensieve"
+bash "$HOME/.claude/skills/pensieve/.src/scripts/install-hooks.sh"
+
 cd <your-project>
-bash ~/.claude/skills/pensieve/.src/scripts/init-project-data.sh
+bash "$HOME/.claude/skills/pensieve/.src/scripts/init-project-data.sh" --client claude
 ```
 
-Or have the agent run `init`.
-
-This creates `maxims/decisions/knowledge/pipelines` under `<project>/.pensieve/` and seeds default content.
+`install-hooks.sh` updates the Claude user settings. Projects without `.pensieve/` remain unaffected.
 
 ## Post-initialization verification
 
 ```bash
-bash ~/.claude/skills/pensieve/.src/scripts/run-doctor.sh --strict
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-doctor.sh" --client <client> --strict
 ```
 
-PASS conditions:
-
-- Skill root contains `.src/`
-- Skill root contains `SKILL.md` (static, tracked)
-- `<project>/.pensieve/{maxims,decisions,knowledge,pipelines}` directories are all present
-- `<project>/.pensieve/.state/` has been generated
-- `<project>/.pensieve/state.md` has been generated
-- Default pipeline and taste-review knowledge have been seeded
+Core PASS conditions include valid structure, frontmatter, state, and graph data. Missing selected-client instruction integration is advisory by default. Add `--require-integration` only when installation policy requires that integration to be present.
 
 ## Updates
 
-### Update system code
+Upgrade accepts only a clean Git worktree and fast-forward history:
 
 ```bash
-cd ~/.claude/skills/pensieve
-git pull --ff-only || { git fetch origin && git reset --hard "origin/$(git rev-parse --abbrev-ref HEAD)"; }
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-upgrade.sh" --client <client>
 ```
 
-`--ff-only` works for normal updates; falls back to `fetch + reset` when the remote has been force-pushed (the skill directory contains only tracked files, so this is safe).
+It never runs a hard reset. If `git pull --ff-only` fails, resolve the branch state explicitly before retrying.
 
-A single update takes effect for all projects. After updating:
+An installed Codex snapshot is not a source checkout. Point the installed tool at the clean clone, then reinstall the plugin:
 
 ```bash
-cd <your-project>
-bash ~/.claude/skills/pensieve/.src/scripts/run-doctor.sh --strict
+bash "<installed-plugin-root>/.src/scripts/run-upgrade.sh" \
+  --client codex --source-root "$HOME/plugins/pensieve"
+codex plugin add pensieve@<marketplace>
 ```
 
-If `doctor` reports structural migration issues:
+Start a new task after reinstalling so Codex reloads skills and the current Hook definitions.
+
+## Migration
 
 ```bash
-bash ~/.claude/skills/pensieve/.src/scripts/run-migrate.sh
-bash ~/.claude/skills/pensieve/.src/scripts/run-doctor.sh --strict
+# Zero-write preview
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-migrate.sh" --client <client> --dry-run
+
+# Copy legacy data and keep the source
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-migrate.sh" --client <client>
+
+# Optional, destructive only after complete verified backup
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-migrate.sh" --client <client> --cleanup-legacy
 ```
 
-## Reinstallation
+Migration never replaces an existing pipeline, maxim, or knowledge seed. Conflicting legacy data is written as a separate timestamped candidate. Unknown legacy files stay in place by default and are included in the full backup before explicit cleanup.
 
-If you have corrupted the system files yourself:
+## Reinstallation and removal
 
-1. Back up project user data: `<project>/.pensieve/` (for each project)
-2. Delete the old skill checkout: `rm -rf ~/.claude/skills/pensieve`
-3. Clone again (Step 1)
-4. Run `init` for each project (Step 3)
-5. Run `doctor`
+Before changing an installation:
 
-If this is just a normal upgrade, do not reinstall — use the upgrade tool or manually run `git pull`.
+1. Confirm the exact source or installed snapshot path.
+2. Preserve every project `.pensieve/` directory.
+3. Prefer moving the old installation to a timestamped backup over deleting it.
+4. Install the replacement and verify Skill discovery.
+5. Run Doctor for one temporary or non-production project.
+6. For Codex, start a new task and review changed Hook hashes again.
 
-## Uninstallation
+Removing the plugin or Skill does not imply permission to remove project `.pensieve/` data.
 
-```bash
-# Manually remove pensieve hook entries from ~/.claude/settings.json
-# Delete system code
-rm -rf ~/.claude/skills/pensieve
+## Hook capability mapping
 
-# Delete project data (optional, per project)
-rm -rf <project>/.pensieve
-```
+| Purpose | Claude Code | Codex |
+|---|---|---|
+| Session health and due reminder | `SessionStart` | `SessionStart` |
+| Subagent recall | `PreToolUse Agent` | `SubagentStart` |
+| Knowledge-state refresh | `PostToolUse Write/Edit/MultiEdit` | `PostToolUse Edit|Write` |
 
-## Hook capabilities
-
-After installing hooks, the following additional capabilities are available:
-
-- SessionStart marker check
-- PreToolUse Explore/Plan prompt injection (SKILL.md + state.md)
-- PostToolUse graph and auto-memory sync
-
-## Routing rules
-
-- Ask "How do I install/reinstall Pensieve":
-  Read this file first, then direct to `init`
-- Ask "How do I update Pensieve":
-  Read this file first, then direct to `upgrade`
-- Ask "How do I clean up old structures/old graph":
-  Read this file first, then direct to `migrate`
-- Ask "How do I verify everything is working after installation":
-  Read this file first, then direct to `doctor`
+Both adapters call `.src/core/hook_runtime.py`; provider envelopes differ, semantic outcomes do not.

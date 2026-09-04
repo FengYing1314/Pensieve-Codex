@@ -24,10 +24,10 @@ Default pipeline seeds come from `.src/templates/pipelines/run-when-*.md`; do no
 
 ## Standard execution
 
-> All `.src/` paths below are relative to the skill root (`$PENSIEVE_SKILL_ROOT`, typically `~/.claude/skills/pensieve/`).
+Set `PENSIEVE_SKILL_ROOT` to the checkout or plugin root. Choose the active client explicitly when known.
 
 ```bash
-bash "${PENSIEVE_SKILL_ROOT:-$HOME/.claude/skills/pensieve}/.src/scripts/init-project-data.sh"
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/init-project-data.sh" --client auto
 ```
 
 Then:
@@ -38,5 +38,5 @@ Then:
 4. Finally, remind the user to run doctor manually:
 
 ```bash
-bash "${PENSIEVE_SKILL_ROOT:-$HOME/.claude/skills/pensieve}/.src/scripts/run-doctor.sh" --strict
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-doctor.sh" --client auto --strict
 ```

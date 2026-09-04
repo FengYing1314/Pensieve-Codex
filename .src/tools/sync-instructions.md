@@ -1,5 +1,5 @@
 ---
-description: Write the current project's existing Pensieve pipelines into a short-route block in CLAUDE.md / AGENTS.md. Idempotent; does not overwrite user content.
+description: Write the current project's existing Pensieve pipelines into a short-route block in the selected CLAUDE.md and/or AGENTS.md. Idempotent; does not overwrite user content.
 ---
 
 # Sync Instructions Tool
@@ -22,17 +22,26 @@ This tool only writes short routes. It does not generate project summaries or in
 
 ## Standard execution
 
-> All `.src/` paths below are relative to the skill root (`$PENSIEVE_SKILL_ROOT`, typically `~/.claude/skills/pensieve/`).
+Set `PENSIEVE_SKILL_ROOT` to the checkout or plugin root.
 
 ```bash
-bash "${PENSIEVE_SKILL_ROOT:-$HOME/.claude/skills/pensieve}/.src/scripts/sync-instructions.sh" --target all
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/sync-instructions.sh" --client auto --target all
 ```
 
 To update only existing entry files without creating new `CLAUDE.md` / `AGENTS.md` files:
 
 ```bash
-bash "${PENSIEVE_SKILL_ROOT:-$HOME/.claude/skills/pensieve}/.src/scripts/sync-instructions.sh" --target auto
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/sync-instructions.sh" --client auto --target auto
 ```
+
+Client-specific targets:
+
+```bash
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/sync-instructions.sh" --client codex --target codex
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/sync-instructions.sh" --client claude --target claude
+```
+
+`agents` and `agent` remain compatibility aliases for `codex`.
 
 ## Written Content
 

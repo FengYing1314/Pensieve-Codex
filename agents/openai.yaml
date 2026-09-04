@@ -1,3 +1,6 @@
 interface:
   display_name: "Pensieve"
   short_description: "Structured project memory and workflow routing"
+  default_prompt: "Use $pensieve to route this request through the project's stored knowledge and workflows."
+policy:
+  allow_implicit_invocation: true

@@ -1,17 +1,22 @@
 # Directory Layout
 
-Pensieve v2 separates system code (user-level) from project data (project-level).
+Pensieve separates client-installed system code from project-owned data.
 
 ## Two anchor points
 
-- **Skill root** (`~/.claude/skills/pensieve/`): global git clone, system files, tracked by git
+- **System root** (source checkout or installed plugin snapshot): shared `.src/` and client entry points
 - **Project data** (`<project>/.pensieve/`): independent per project, can be version-controlled
 
 ## Layout
 
 ```text
-~/.claude/skills/pensieve/          # User-level (global, single installation)
-├── SKILL.md                        #   Static: frontmatter + routing (tracked)
+Pensieve/                           # Source checkout / packaged plugin root
+├── .codex-plugin/plugin.json       #   Codex native manifest
+├── hooks/hooks.json                #   Codex native lifecycle hooks
+├── skills/
+│   ├── pensieve/                   #   Codex seven-tool router
+│   └── pensieve-wand/              #   Codex recall workflow
+├── SKILL.md                        #   Claude/general static routing entry
 ├── .src/                           #   System scripts, templates, specs (tracked)
 │   ├── core/
 │   ├── scripts/
@@ -22,7 +27,7 @@ Pensieve v2 separates system code (user-level) from project data (project-level)
 │   │   └── pipelines/
 │   ├── references/
 │   └── tools/
-└── agents/                         #   agent/UI metadata (tracked)
+└── agents/                         #   root Skill UI metadata
 
 <project>/.codex/skills/            # Project-level Codex skill (only for maintaining this repository)
 └── pensieve-sync-to-main/
@@ -50,15 +55,16 @@ Pensieve v2 separates system code (user-level) from project data (project-level)
 
 ## Notes
 
-- `.src/`, `agents/`, and `SKILL.md` are tracked system files updated by `git pull` in the skill root
+- `.src/` is the only implementation source; root and Codex skills are thin client adapters
+- Source checkouts update only through a clean `git pull --ff-only`; installed Codex snapshots are reinstalled from their source marketplace
 - Project-level maintenance skills live under `<project>/.codex/skills/`; default content seeded into user projects lives under `.src/templates/`
 - `SKILL.md` is a **static, tracked** file: the skill interface declaration; scripts do not generate it
 - `state.md` is a **dynamic, generated** file at `<project>/.pensieve/state.md`, refreshed by `init/doctor/migrate/upgrade/self-improve/sync`
 - `maxims/decisions/knowledge/pipelines` are long-term user data, created locally after initialization
 - `short-term/` is the staging area for new conclusions; it mirrors the long-term directory structure and uses `created` + 7-day TTL reminders for triage
 - `.state/` lives inside `.pensieve/` and stores runtime artifacts such as doctor reports, migration backups, session markers, and generated graphs
-- `maintain-project-state.sh` rewrites `state.md`
+- `maintain-project-state.sh` atomically replaces `state.md` only when content changes and serializes concurrent Hook updates
 - `generate-user-data-graph.sh` / `doctor` output the graph to `.pensieve/.state/pensieve-user-data-graph.md` by default
-- Any directory containing `.src/manifest.json` is the current system skill root
-- When `init` detects `<project>/.claude/`, it seeds `.src/templates/agents/*.md` into `<project>/.claude/agents/`
+- Any directory containing `.src/manifest.json` is a valid system root
+- Claude init can seed `.src/templates/agents/*.md` into `<project>/.claude/agents/`; Codex uses the packaged `skills/pensieve-wand` and never creates Claude client files
 - `init` seeds `.src/templates/pipelines/run-when-*.md` into `<project>/.pensieve/pipelines/`

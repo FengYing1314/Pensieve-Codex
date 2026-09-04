@@ -1,5 +1,5 @@
 ---
-description: Refresh the current git clone of the Pensieve skill source. Prefers git pull --ff-only; automatically falls back to fetch+reset when the remote has been force-pushed. Does not perform structural migration or doctor grading.
+description: Refresh a clean Pensieve source checkout using git pull --ff-only. Refuses dirty, non-Git, and non-fast-forward states and never resets local history.
 ---
 
 # Upgrade Tool
@@ -13,25 +13,26 @@ description: Refresh the current git clone of the Pensieve skill source. Prefers
 
 If the user first asks "how to update Pensieve", read `.src/references/skill-lifecycle.md` first, then run this tool.
 
-This tool is only responsible for the global skill checkout (`~/.claude/skills/pensieve/`).
-Hooks are installed globally via `install-hooks.sh` and do not need to be updated separately.
+This tool updates source checkouts only. An installed Codex snapshot must use `--source-root <checkout>` and then be reinstalled from its configured marketplace.
 
 ## Standard execution
 
-> All `.src/` paths below are relative to the skill root (`$PENSIEVE_SKILL_ROOT`, typically `~/.claude/skills/pensieve/`).
+Set `PENSIEVE_SKILL_ROOT` to the checkout or installed plugin root.
 
 ```bash
-bash "${PENSIEVE_SKILL_ROOT:-$HOME/.claude/skills/pensieve}/.src/scripts/run-upgrade.sh"
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-upgrade.sh" --client auto
 ```
 
 Optional dry-run:
 
 ```bash
-bash "${PENSIEVE_SKILL_ROOT:-$HOME/.claude/skills/pensieve}/.src/scripts/run-upgrade.sh" --dry-run
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-upgrade.sh" --client auto --dry-run
 ```
 
 After upgrade, manually run:
 
 ```bash
-bash "${PENSIEVE_SKILL_ROOT:-$HOME/.claude/skills/pensieve}/.src/scripts/run-doctor.sh" --strict
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-doctor.sh" --client auto --strict
 ```
+
+There is no force-reset fallback. If fast-forward fails, resolve the source checkout explicitly and retry.

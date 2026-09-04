@@ -1,5 +1,5 @@
 ---
-description: Read-only scan of the current project's .pensieve/ user-data directory. Checks frontmatter, links, directory structure, critical seed files, auto memory, and Pensieve short-route alignment in project instruction files, then emits a fixed-format report.
+description: Scan the current project's .pensieve/ data and only the selected client integration, then emit a fixed-format report without modifying project knowledge or business code.
 ---
 
 # Doctor Tool
@@ -11,22 +11,24 @@ description: Read-only scan of the current project's .pensieve/ user-data direct
 - Rechecking after init
 - Rechecking after upgrade
 - Confirming MUST_FIX is cleared after migration
-- Suspected drift in the graph, frontmatter, directory structure, memory guidance, or `CLAUDE.md` / `AGENTS.md` short routes
+- Suspected drift in the graph, frontmatter, directory structure, or the selected client's short routes
 
 ## Standard execution
 
-> All `.src/` paths below are relative to the skill root (`$PENSIEVE_SKILL_ROOT`, typically `~/.claude/skills/pensieve/`).
+Set `PENSIEVE_SKILL_ROOT` to the checkout or plugin root.
 
 ```bash
-bash "${PENSIEVE_SKILL_ROOT:-$HOME/.claude/skills/pensieve}/.src/scripts/run-doctor.sh" --strict
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-doctor.sh" --client auto --strict
 ```
 
 Doctor only maintains:
 
 - `<project>/.pensieve/state.md` (lifecycle state + Graph)
 - Runtime graph output such as `.pensieve/.state/pensieve-user-data-graph.md`
-- Claude auto memory `~/.claude/projects/<project>/memory/MEMORY.md`
+- Claude auto memory only when `--client claude|both` is selected
 
-Doctor reports missing or drifted `CLAUDE.md` / `AGENTS.md` Pensieve short routes as MUST_FIX, but it does not modify them automatically. Use `sync-instructions` to fix them.
+Doctor reports missing or drifted selected-client integration as `SHOULD_FIX` by default. Add `--require-integration` to promote those findings to `MUST_FIX`. Codex never checks Claude files; Claude never requires `AGENTS.md`.
+
+Bundled seeds become project-owned after initialization. Missing seeds are reported, but customized seed content is not treated as damage.
 
 It does not modify business code.

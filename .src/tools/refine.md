@@ -102,5 +102,5 @@ From a holistic perspective, discover that seemingly different entries are actua
 After any write operation, refresh the project state:
 
 ```bash
-bash "${PENSIEVE_SKILL_ROOT:-$HOME/.claude/skills/pensieve}/.src/scripts/maintain-project-state.sh" --event sync --note "refine: description"
+bash "$PENSIEVE_SKILL_ROOT/.src/scripts/maintain-project-state.sh" --client auto --event sync --note "refine: description"
 ```
