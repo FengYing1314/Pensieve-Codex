@@ -12,6 +12,31 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
+CLIENT_REQUEST="${PENSIEVE_CLIENT:-auto}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --client)
+      [[ $# -ge 2 ]] || { echo "Missing value for --client" >&2; exit 1; }
+      CLIENT_REQUEST="$2"
+      shift 2
+      ;;
+    -h|--help)
+      cat <<'USAGE'
+Usage: init-project-data.sh [--client auto|codex|claude|both|generic]
+USAGE
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+CLIENT="$(pensieve_client "$CLIENT_REQUEST" "$SCRIPT_DIR")"
+export PENSIEVE_CLIENT="$CLIENT"
+
 is_readme_file() {
   case "$(basename "$1")" in
     [Rr][Ee][Aa][Dd][Mm][Ee]|[Rr][Ee][Aa][Dd][Mm][Ee].md)
@@ -94,7 +119,7 @@ fi
 TEMPLATE_AGENTS_DIR="$TEMPLATES_ROOT/agents"
 AGENT_SEEDED_COUNT=0
 AGENT_SEEDED_TARGET=""
-if [[ -d "$TEMPLATE_AGENTS_DIR" ]]; then
+if client_includes "$CLIENT" claude && [[ -d "$TEMPLATE_AGENTS_DIR" ]]; then
   for client_dir in .claude; do
     if [[ -d "$_PROJECT_ROOT/$client_dir" ]]; then
       AGENTS_DIR="$_PROJECT_ROOT/$client_dir/agents"
@@ -115,6 +140,7 @@ if [[ -d "$TEMPLATE_AGENTS_DIR" ]]; then
 fi
 
 echo "✅ Initialization complete: $DATA_ROOT"
+echo "  - client: $CLIENT"
 MAXIM_COUNT=0
 if [[ -d "$DATA_ROOT/maxims" ]]; then
   MAXIM_COUNT="$(find "$DATA_ROOT/maxims" -maxdepth 1 -type f -name '*.md' | wc -l | tr -d ' ')"
@@ -130,12 +156,12 @@ fi
 echo "  - runtime state: $STATE_ROOT"
 
 if [[ -f "$PROJECT_STATE_SCRIPT" ]]; then
-  if ! bash "$PROJECT_STATE_SCRIPT" --event install --note "seeded project data via init-project-data.sh"; then
+  if ! bash "$PROJECT_STATE_SCRIPT" --client "$CLIENT" --event install --note "seeded project data via init-project-data.sh"; then
     echo "⚠️  Generated state update skipped: failed to run maintain-project-state.sh" >&2
   fi
 fi
 
 MARKER_SCRIPT="$SKILL_ROOT/.src/scripts/pensieve-session-marker.sh"
 if [[ -f "$MARKER_SCRIPT" ]]; then
-  bash "$MARKER_SCRIPT" --mode record --event init || true
+  bash "$MARKER_SCRIPT" --client "$CLIENT" --mode record --event init || true
 fi

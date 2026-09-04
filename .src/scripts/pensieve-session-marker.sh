@@ -1,7 +1,5 @@
 #!/bin/bash
-# Pensieve marker state manager.
-# - session-start: read-only check and optional context injection.
-# - record: update marker after init/doctor/migrate/upgrade actually finishes.
+# Read or update the provider-neutral Pensieve lifecycle marker.
 
 set -euo pipefail
 
@@ -10,6 +8,7 @@ source "$SCRIPT_DIR/lib.sh"
 
 MODE="session-start"
 EVENT=""
+CLIENT_REQUEST="${PENSIEVE_CLIENT:-auto}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -23,11 +22,16 @@ while [[ $# -gt 0 ]]; do
       EVENT="$2"
       shift 2
       ;;
+    --client)
+      [[ $# -ge 2 ]] || { echo "Missing value for --client" >&2; exit 1; }
+      CLIENT_REQUEST="$2"
+      shift 2
+      ;;
     -h|--help)
       cat <<'USAGE'
 Usage:
-  pensieve-session-marker.sh --mode session-start
-  pensieve-session-marker.sh --mode record --event <install|init|upgrade|migrate|doctor|self-improve|sync>
+  pensieve-session-marker.sh --mode session-start [--client <name>]
+  pensieve-session-marker.sh --mode record --event <name> [--client <name>]
 USAGE
       exit 0
       ;;
@@ -39,19 +43,16 @@ USAGE
 done
 
 case "$MODE" in
-  session-start|record)
-    ;;
-  *)
-    echo "Unsupported --mode: $MODE" >&2
-    exit 1
-    ;;
+  session-start|record) ;;
+  *) echo "Unsupported --mode: $MODE" >&2; exit 1 ;;
 esac
-
 if [[ "$MODE" == "record" && -z "$EVENT" ]]; then
   echo "--event is required for --mode record" >&2
   exit 1
 fi
 
+CLIENT="$(pensieve_client "$CLIENT_REQUEST" "$SCRIPT_DIR")"
+export PENSIEVE_CLIENT="$CLIENT"
 ensure_python_env
 [[ -n "${PYTHON_BIN:-}" ]] || exit 0
 
@@ -59,244 +60,121 @@ SKILL_ROOT="$(skill_root_from_script "$SCRIPT_DIR")"
 PROJECT_ROOT="$(project_root)" || exit 0
 PROJECT_ROOT="$(to_posix_path "$PROJECT_ROOT")"
 
-# Graceful degradation: silently exit for projects without .pensieve/.
-# This ensures zero impact on projects that do not use Pensieve (architecture-v2 §5.3).
-# The record mode is exempt because init calls it to create the initial marker.
 if [[ "$MODE" == "session-start" && ! -d "$PROJECT_ROOT/.pensieve" ]]; then
   exit 0
 fi
-STATE_ROOT="$(state_root)" || exit 0
-STATE_ROOT="$(to_posix_path "$STATE_ROOT")"
-SKILL_VERSION="$(skill_version "$SCRIPT_DIR")"
-MARKER_FILE="$STATE_ROOT/pensieve-session-marker.json"
-NOW_UTC="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
-"$PYTHON_BIN" - "$MODE" "$EVENT" "$MARKER_FILE" "$SKILL_VERSION" "$PROJECT_ROOT" "$NOW_UTC" "$SKILL_ROOT" <<'PY'
+SKILL_VERSION="$(skill_version "$SCRIPT_DIR")"
+NOW_UTC="$(runtime_now_utc)"
+
+"$PYTHON_BIN" - "$MODE" "$EVENT" "$CLIENT" "$PROJECT_ROOT" "$SKILL_ROOT" "$SKILL_VERSION" "$NOW_UTC" <<'PY'
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sys
-import tempfile
+import time
 from pathlib import Path
-from typing import Any
 
-mode = sys.argv[1].strip().lower()
-event_raw = sys.argv[2].strip().lower()
-marker_file = Path(sys.argv[3])
-skill_version = sys.argv[4].strip()
-project_root = sys.argv[5].strip()
-now_utc = sys.argv[6].strip()
-skill_root = sys.argv[7].strip()
+mode, event, client = sys.argv[1:4]
+project_root = Path(sys.argv[4])
+skill_root = Path(sys.argv[5])
+skill_version = sys.argv[6]
+now_utc = sys.argv[7]
+
+sys.path.insert(0, str(skill_root / ".src" / "core"))
+import hook_runtime
+
+data_root = project_root / ".pensieve"
+marker_file = data_root / ".state" / "pensieve-session-marker.json"
 
 
-def load_json(path: Path) -> dict[str, Any]:
+@contextlib.contextmanager
+def marker_lock(state_dir: Path):
+    state_dir.mkdir(parents=True, exist_ok=True)
+    lock_file = state_dir / ".marker.lock"
+    stream = lock_file.open("a+")
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-    return data if isinstance(data, dict) else {}
+        try:
+            import fcntl
+        except ImportError:
+            fcntl = None
+        if fcntl is not None:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+            yield
+        else:
+            lock_dir = state_dir / ".marker.lock.d"
+            for _ in range(600):
+                try:
+                    lock_dir.mkdir()
+                    break
+                except FileExistsError:
+                    time.sleep(0.05)
+            else:
+                raise TimeoutError("timed out waiting for marker lock")
+            try:
+                yield
+            finally:
+                try:
+                    lock_dir.rmdir()
+                except OSError:
+                    pass
+    finally:
+        stream.close()
 
 
-def normalize_event(value: str) -> str:
+def normalize_event(raw: str) -> str:
+    value = raw.strip().lower()
     if value in {"init", "install"}:
         return "init"
-    if value == "doctor":
-        return "doctor"
-    if value == "upgrade":
-        return "upgrade"
-    if value == "migrate":
-        return "migrate"
-    if value in {"self-improve", "selfimprove"}:
+    if value in {"selfimprove", "self-improve"}:
         return "self-improve"
-    if value in {"sync", "auto-sync"}:
+    if value in {"sync", "auto-sync", "sync-instructions"}:
         return "sync"
     return value
 
 
-def default_state() -> dict[str, Any]:
-    return {
+if mode == "session-start":
+    semantics = hook_runtime.session_semantics(project_root, skill_root, skill_version)
+    if semantics is not None:
+        print(json.dumps(hook_runtime.render_context_output(client, semantics), ensure_ascii=False))
+    raise SystemExit(0)
+
+with marker_lock(marker_file.parent):
+    state = hook_runtime.read_json_object(marker_file)
+    if state.get("schema_version") != 1:
+        state = {}
+    state = {
         "schema_version": 1,
-        "project_root": project_root,
-        "skill_root": skill_root,
-        "skill_version": skill_version,
-        "initialized": False,
-        "self_check_version": "",
-        "self_check_at": "",
-        "last_event": "",
-        "updated_at": now_utc,
+        "project_root": str(project_root),
+        "skill_root": str(skill_root),
+        "skill_version": str(state.get("skill_version") or skill_version),
+        "initialized": bool(state.get("initialized")),
+        "self_check_version": str(state.get("self_check_version") or ""),
+        "self_check_at": str(state.get("self_check_at") or ""),
+        "last_event": str(state.get("last_event") or ""),
+        "updated_at": str(state.get("updated_at") or now_utc),
     }
 
+    if state["skill_version"] != skill_version:
+        state["skill_version"] = skill_version
+        state["self_check_version"] = ""
+        state["self_check_at"] = ""
 
-def write_json_atomic(path: Path, payload_obj: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(payload_obj, ensure_ascii=False, indent=2) + "\n"
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        dir=str(path.parent),
-        prefix=path.name + ".",
-        suffix=".tmp",
-        delete=False,
-    ) as tmp:
-        tmp.write(payload)
-        tmp_path = Path(tmp.name)
-    os.replace(tmp_path, path)
-
-
-def ensure_state_gitignore(state_dir: Path) -> None:
-    state_dir.mkdir(parents=True, exist_ok=True)
-    ignore_file = state_dir / ".gitignore"
-    existing = ignore_file.read_text(encoding="utf-8") if ignore_file.exists() else ""
-    lines = existing.splitlines()
-    if "*" in lines:
-        return
-    lines.append("*")
-    payload = "\n".join(lines).rstrip() + "\n"
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        dir=str(state_dir),
-        prefix=ignore_file.name + ".",
-        suffix=".tmp",
-        delete=False,
-    ) as tmp:
-        tmp.write(payload)
-        tmp_path = Path(tmp.name)
-    os.replace(tmp_path, ignore_file)
-
-
-raw_state = load_json(marker_file)
-if raw_state.get("schema_version") != 1:
-    state = default_state()
-else:
-    state = default_state()
-    for key, value in raw_state.items():
-        state[key] = value
-
-state["project_root"] = project_root
-state["skill_root"] = skill_root
-
-stored_skill_version = str(state.get("skill_version") or "")
-if stored_skill_version != skill_version:
-    state["skill_version"] = skill_version
-    state["self_check_version"] = ""
-    state["self_check_at"] = ""
-
-if mode == "record":
-    event = normalize_event(event_raw)
-    if event == "init":
+    normalized = normalize_event(event)
+    if normalized == "init":
         state["initialized"] = True
-    elif event == "doctor" and bool(state.get("initialized")):
+    elif normalized == "doctor" and state["initialized"]:
         state["self_check_version"] = skill_version
         state["self_check_at"] = now_utc
-    elif event == "upgrade":
+    elif normalized == "upgrade":
         state["self_check_version"] = ""
         state["self_check_at"] = ""
 
     state["skill_version"] = skill_version
-    state["last_event"] = event or str(state.get("last_event") or "")
+    state["last_event"] = normalized or state["last_event"]
     state["updated_at"] = now_utc
-
-    ensure_state_gitignore(marker_file.parent)
-    write_json_atomic(marker_file, state)
-    sys.exit(0)
-
-initialized = bool(state.get("initialized"))
-self_check_version = str(state.get("self_check_version") or "")
-self_check_ok = self_check_version == skill_version
-
-if initialized and self_check_ok:
-    # Scan short-term/ for due items
-    import datetime as _dt
-    import re as _re
-
-    _st_dir = Path(project_root) / ".pensieve" / "short-term"
-    _st_total = 0
-    _st_due = 0
-    _today = _dt.date.today()
-    _ttl_days = 7
-    _date_re = _re.compile(r"^created:\s*(\d{4}-\d{2}-\d{2})", _re.MULTILINE)
-
-    if _st_dir.is_dir():
-        for _f in sorted(_st_dir.rglob("*.md")):
-            if not _f.is_file():
-                continue
-            _text = _f.read_text(encoding="utf-8", errors="replace")[:1024]
-            _fm_end = _text.find("\n---", 4)
-            if _fm_end < 0:
-                continue
-            _fm = _text[: _fm_end]
-            # Skip seed files
-            _tags_idx = _fm.find("tags:")
-            if _tags_idx >= 0 and "seed" in _fm[_tags_idx:].split("\n")[0].lower():
-                continue
-            _m = _date_re.search(_fm)
-            if not _m:
-                continue
-            try:
-                _created = _dt.date.fromisoformat(_m.group(1))
-            except ValueError:
-                continue
-            _st_total += 1
-            if (_today - _created).days >= _ttl_days:
-                _st_due += 1
-
-    ctx = f"PENSIEVE_SKILL_ROOT={skill_root}\nPENSIEVE_PROJECT_ROOT={project_root}"
-    if _st_due > 0:
-        ctx += f"\n\nShort-term memory due for refine: {_st_due} item(s) overdue (total {_st_total}). Run pensieve refine to process."
-
-    payload = {
-        "hookSpecificOutput": {
-            "hookEventName": "SessionStart",
-            "additionalContext": ctx,
-        },
-    }
-    if _st_due > 0:
-        payload["systemMessage"] = f"Pensieve: {_st_due} short-term item(s) due for refine. Run pensieve refine to process."
-    print(json.dumps(payload, ensure_ascii=False))
-    sys.exit(0)
-
-record_init_cmd = f"bash '{skill_root}/.src/scripts/pensieve-session-marker.sh' --mode record --event init"
-record_doctor_cmd = f"bash '{skill_root}/.src/scripts/pensieve-session-marker.sh' --mode record --event doctor"
-
-messages: list[str] = []
-messages.append(f"PENSIEVE_SKILL_ROOT={skill_root}")
-messages.append(f"PENSIEVE_PROJECT_ROOT={project_root}")
-messages.append("")
-messages.append("## Pensieve Session Pre-check")
-messages.append("")
-messages.append("- Severity: `P0` (affects downstream routing and diagnostic accuracy)")
-messages.append("- Main window strategy: complete pre-check fixes and update marker before handling the user's current request.")
-messages.append("- Action: report the status above to the user and ask whether to complete `init/doctor` pre-check fixes now.")
-messages.append(f"- Current skill version: `{skill_version}`")
-messages.append(f"- Current project marker: `{marker_file}`")
-messages.append("- Rule: only update this marker file after the main window confirms migration/fix is complete.")
-
-if not initialized:
-    messages.append("- Project not initialized: run `init` first.")
-    messages.append(f"- After `init` succeeds, run in main window: `{record_init_cmd}`")
-
-if not self_check_ok:
-    recorded = self_check_version if self_check_version else "not recorded"
-    messages.append(f"- Self-check version mismatch: recorded `{recorded}`, required `{skill_version}`. Run `doctor` first.")
-    messages.append(f"- After `doctor` passes, run in main window: `{record_doctor_cmd}`")
-
-messages.append("- Suggested order: `init` -> `doctor`." if not initialized else "- Suggested action: run `doctor` and update marker.")
-
-user_parts: list[str] = []
-if not initialized:
-    user_parts.append("not initialized")
-if not self_check_ok:
-    user_parts.append("doctor version mismatch")
-user_summary = f"Pensieve ({skill_version}): {', '.join(user_parts)}. Run /pensieve doctor to fix."
-
-payload = {
-    "hookSpecificOutput": {
-        "hookEventName": "SessionStart",
-        "additionalContext": "\n".join(messages),
-    },
-    "systemMessage": user_summary,
-}
-print(json.dumps(payload, ensure_ascii=False))
+    hook_runtime.write_text_atomic_if_changed(marker_file.parent / ".gitignore", "*\n")
+    hook_runtime.write_json_atomic_if_changed(marker_file, state)
 PY

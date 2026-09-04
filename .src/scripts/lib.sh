@@ -2,7 +2,7 @@
 # Pensieve shared library
 #
 # Conventions (v2):
-# - The skill root is the global git checkout at ~/.claude/skills/pensieve/.
+# - The skill root is a global checkout or an installed Codex plugin snapshot.
 # - Tracked system files live under .src/, agents/, and SKILL.md (static, tracked).
 # - User data lives at <project>/.pensieve/ (maxims/decisions/knowledge/pipelines).
 # - Dynamic project state lives at <project>/.pensieve/state.md.
@@ -95,6 +95,14 @@ skill_root() {
         to_posix_path "$PENSIEVE_SKILL_ROOT"
         return 0
     fi
+    if [[ -n "${PLUGIN_ROOT:-}" && -f "$(to_posix_path "$PLUGIN_ROOT")/.src/manifest.json" ]]; then
+        to_posix_path "$PLUGIN_ROOT"
+        return 0
+    fi
+    if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" && -f "$(to_posix_path "$CLAUDE_PLUGIN_ROOT")/.src/manifest.json" ]]; then
+        to_posix_path "$CLAUDE_PLUGIN_ROOT"
+        return 0
+    fi
     if [[ -d "$caller" ]]; then
         skill_root_from_script "$caller"
     else
@@ -161,22 +169,8 @@ project_root() {
         start_dir="$(dirname "$caller")"
     fi
 
-    # Try git first from the caller's directory.
-    # But skip if the result is the skill root itself (v2: skill root is a
-    # separate git repo at user-level, not the project).
-    local git_root
-    if git_root="$(git -C "$start_dir" rev-parse --show-toplevel 2>/dev/null)"; then
-        git_root="$(to_posix_path "$git_root")"
-        local sr_check
-        if sr_check="$(skill_root "$caller" 2>/dev/null)" && [[ "$git_root" == "$sr_check" ]]; then
-            : # git root is the skill root, not the project — skip
-        else
-            echo "$git_root"
-            return 0
-        fi
-    fi
-
-    # Walk up looking for .pensieve/ directory (v2 project marker).
+    # Prefer the nearest .pensieve/ marker. This is important for nested
+    # projects that live inside a larger Git worktree.
     local dir prev_dir
     dir="$(cd "$start_dir" && pwd)"
     local depth=0
@@ -191,8 +185,91 @@ project_root() {
         depth=$((depth + 1))
     done
 
+    # Fall back to the Git root for initialization in projects that do not yet
+    # have a .pensieve/ marker.
+    local git_root
+    if git_root="$(git -C "$start_dir" rev-parse --show-toplevel 2>/dev/null)"; then
+        git_root="$(to_posix_path "$git_root")"
+        local sr_check
+        if sr_check="$(skill_root "$caller" 2>/dev/null)" && [[ "$git_root" == "$sr_check" ]]; then
+            :
+        else
+            echo "$git_root"
+            return 0
+        fi
+    fi
+
+    # Non-Git projects are supported. Use the caller's directory and let
+    # validate_project_root reject unsafe broad locations.
+    if [[ -d "$start_dir" ]]; then
+        local fallback sr_fallback
+        fallback="$(cd "$start_dir" && pwd)"
+        if ! sr_fallback="$(skill_root "$caller" 2>/dev/null)" || [[ "$fallback" != "$sr_fallback" ]]; then
+            echo "$fallback"
+            return 0
+        fi
+    fi
+
     echo "project_root: unable to determine project root from '$start_dir'. Set PENSIEVE_PROJECT_ROOT or cd into your project." >&2
     return 1
+}
+
+normalize_pensieve_client() {
+    local raw="${1:-auto}"
+    raw="$(printf '%s' "$raw" | tr 'A-Z' 'a-z')"
+    case "$raw" in
+        agent|agents)
+            echo "codex"
+            ;;
+        auto|codex|claude|both|generic)
+            echo "$raw"
+            ;;
+        *)
+            echo "Unsupported Pensieve client: $raw (expected auto|codex|claude|both|generic)" >&2
+            return 1
+            ;;
+    esac
+}
+
+pensieve_client() {
+    local requested caller normalized root_hint
+    requested="${1:-${PENSIEVE_CLIENT:-auto}}"
+    caller="${2:-$(pwd)}"
+    normalized="$(normalize_pensieve_client "$requested")" || return 1
+    if [[ "$normalized" != "auto" ]]; then
+        echo "$normalized"
+        return 0
+    fi
+
+    if [[ -n "${CLAUDE_PROJECT_DIR:-}" || -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
+        echo "claude"
+        return 0
+    fi
+    if [[ -n "${PLUGIN_ROOT:-}" || -n "${CODEX_HOME:-}" ]]; then
+        echo "codex"
+        return 0
+    fi
+
+    root_hint="$(skill_root "$caller" 2>/dev/null || true)"
+    root_hint="${root_hint//\\//}"
+    case "$root_hint" in
+        */.claude/*)
+            echo "claude"
+            ;;
+        */.codex/*|*/plugins/cache/*)
+            echo "codex"
+            ;;
+        *)
+            echo "generic"
+            ;;
+    esac
+}
+
+client_includes() {
+    local client target
+    client="$(normalize_pensieve_client "$1")" || return 1
+    target="$(normalize_pensieve_client "$2")" || return 1
+    [[ "$client" == "$target" || "$client" == "both" ]]
 }
 
 user_data_root() {

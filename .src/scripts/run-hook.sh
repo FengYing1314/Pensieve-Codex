@@ -1,5 +1,5 @@
 #!/bin/bash
-# Unified hook launcher for optional Claude hook wiring.
+# Unified hook launcher for optional Claude and Codex hook wiring.
 
 set -euo pipefail
 
@@ -40,7 +40,7 @@ to_posix_path() {
   echo "$raw_path"
 }
 
-ROOT_RAW="${PENSIEVE_SKILL_ROOT:-}"
+ROOT_RAW="${PENSIEVE_SKILL_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}"
 if [[ -z "$ROOT_RAW" ]]; then
   # Resolve HOME reliably (may be unset on some Windows shell configurations).
   if [[ -z "${HOME:-}" ]]; then
@@ -52,7 +52,7 @@ if [[ -z "$ROOT_RAW" ]]; then
       export HOME
     fi
   fi
-  # v2: default to user-level skill root
+  # Legacy Claude Code installation fallback.
   ROOT_RAW="${HOME:+$HOME/.claude/skills/pensieve}"
   # Fallback: derive from script location
   if [[ -z "$ROOT_RAW" || ! -d "$ROOT_RAW" ]]; then
@@ -81,4 +81,13 @@ export PENSIEVE_SKILL_ROOT="$ROOT"
   exit 1
 }
 
-exec bash "$TARGET" "$@"
+case "$TARGET" in
+  *.py)
+    PYTHON_BIN="$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)"
+    [[ -n "$PYTHON_BIN" ]] || { echo "Python not found" >&2; exit 1; }
+    exec "$PYTHON_BIN" "$TARGET" "$@"
+    ;;
+  *)
+    exec bash "$TARGET" "$@"
+    ;;
+esac

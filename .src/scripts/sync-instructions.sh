@@ -10,6 +10,7 @@ START_MARKER="<!-- pensieve:instructions:start -->"
 END_MARKER="<!-- pensieve:instructions:end -->"
 TARGET_MODE="all"
 CUSTOM_TARGETS=()
+CLIENT_REQUEST="${PENSIEVE_CLIENT:-auto}"
 
 usage() {
   cat <<'USAGE'
@@ -17,11 +18,13 @@ Usage:
   sync-instructions.sh [options]
 
 Options:
-  --target <mode>   all | auto | claude | agents. Default: all
+  --target <mode>   all | auto | claude | codex | agents. Default: all
                     all    updates/creates CLAUDE.md and AGENTS.md
                     auto   updates existing CLAUDE.md/AGENTS.md, or creates both if neither exists
                     claude updates/creates CLAUDE.md
-                    agents updates/creates AGENTS.md
+                    codex  updates/creates AGENTS.md
+                    agents compatibility alias for codex
+  --client <name>   auto | codex | claude | both | generic
   --file <path>     Update a specific instruction file. May be repeated.
   -h, --help        Show help
 USAGE
@@ -39,6 +42,11 @@ while [[ $# -gt 0 ]]; do
       CUSTOM_TARGETS+=("$2")
       shift 2
       ;;
+    --client)
+      [[ $# -ge 2 ]] || { echo "Missing value for --client" >&2; exit 1; }
+      CLIENT_REQUEST="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -50,6 +58,9 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+CLIENT="$(pensieve_client "$CLIENT_REQUEST" "$SCRIPT_DIR")"
+export PENSIEVE_CLIENT="$CLIENT"
 
 PROJECT_ROOT="$(project_root)" || exit 1
 PROJECT_ROOT="$(to_posix_path "$PROJECT_ROOT")"
@@ -135,16 +146,26 @@ collect_targets() {
       targets+=("$PROJECT_ROOT/CLAUDE.md" "$PROJECT_ROOT/AGENTS.md")
       ;;
     auto)
-      [[ -f "$PROJECT_ROOT/CLAUDE.md" ]] && targets+=("$PROJECT_ROOT/CLAUDE.md")
-      [[ -f "$PROJECT_ROOT/AGENTS.md" ]] && targets+=("$PROJECT_ROOT/AGENTS.md")
-      if [[ "${#targets[@]}" -eq 0 ]]; then
-        targets+=("$PROJECT_ROOT/CLAUDE.md" "$PROJECT_ROOT/AGENTS.md")
-      fi
+      case "$CLIENT" in
+        codex)
+          targets+=("$PROJECT_ROOT/AGENTS.md")
+          ;;
+        claude)
+          targets+=("$PROJECT_ROOT/CLAUDE.md")
+          ;;
+        *)
+          [[ -f "$PROJECT_ROOT/CLAUDE.md" ]] && targets+=("$PROJECT_ROOT/CLAUDE.md")
+          [[ -f "$PROJECT_ROOT/AGENTS.md" ]] && targets+=("$PROJECT_ROOT/AGENTS.md")
+          if [[ "${#targets[@]}" -eq 0 ]]; then
+            targets+=("$PROJECT_ROOT/CLAUDE.md" "$PROJECT_ROOT/AGENTS.md")
+          fi
+          ;;
+      esac
       ;;
     claude)
       targets+=("$PROJECT_ROOT/CLAUDE.md")
       ;;
-    agents|agent)
+    codex|agents|agent)
       targets+=("$PROJECT_ROOT/AGENTS.md")
       ;;
     *)
@@ -253,5 +274,5 @@ rm -f "$BLOCK_FILE"
 
 MARKER_SCRIPT="$SCRIPT_DIR/pensieve-session-marker.sh"
 if [[ -f "$MARKER_SCRIPT" ]]; then
-  bash "$MARKER_SCRIPT" --mode record --event sync-instructions || true
+  bash "$MARKER_SCRIPT" --client "$CLIENT" --mode record --event sync-instructions || true
 fi

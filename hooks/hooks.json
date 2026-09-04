@@ -1,0 +1,45 @@
+{
+  "description": "Optional Pensieve lifecycle integration for Codex; all core tools also work without hooks.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$PLUGIN_ROOT/.src/scripts/run-client-hook.py\" --client codex --event session-start",
+            "timeout": 10,
+            "statusMessage": "Checking Pensieve project memory",
+            "additionalContextLimit": 500
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$PLUGIN_ROOT/.src/scripts/run-client-hook.py\" --client codex --event subagent-start",
+            "timeout": 10,
+            "statusMessage": "Loading Pensieve recall guidance",
+            "additionalContextLimit": 500
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$PLUGIN_ROOT/.src/scripts/run-client-hook.py\" --client codex --event post-tool-use",
+            "timeout": 30,
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}

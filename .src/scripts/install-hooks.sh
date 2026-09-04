@@ -35,7 +35,7 @@ pensieve_hooks = {
             "hooks": [
                 {
                     "type": "command",
-                    "command": f'bash "{run_hook}" pensieve-session-marker.sh --mode session-start',
+                    "command": f'bash "{run_hook}" run-client-hook.py --client claude --event session-start',
                 }
             ]
         }
@@ -46,7 +46,7 @@ pensieve_hooks = {
             "hooks": [
                 {
                     "type": "command",
-                    "command": f'bash "{run_hook}" explore-prehook.sh',
+                    "command": f'bash "{run_hook}" run-client-hook.py --client claude --event subagent-start',
                 }
             ],
         }
@@ -57,7 +57,7 @@ pensieve_hooks = {
             "hooks": [
                 {
                     "type": "command",
-                    "command": f'bash "{run_hook}" sync-project-skill-graph.sh',
+                    "command": f'bash "{run_hook}" run-client-hook.py --client claude --event post-tool-use',
                 }
             ],
         }

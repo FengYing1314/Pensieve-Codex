@@ -1,0 +1,6 @@
+interface:
+  display_name: "Pensieve Wand"
+  short_description: "Recall project knowledge before broad exploration"
+  default_prompt: "Use $pensieve-wand to retrieve relevant project knowledge and known pitfalls before exploring code."
+policy:
+  allow_implicit_invocation: true

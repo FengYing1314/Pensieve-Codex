@@ -10,6 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 EVENT=""
+CLIENT_REQUEST="${PENSIEVE_CLIENT:-auto}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -18,10 +19,15 @@ while [[ $# -gt 0 ]]; do
       EVENT="$2"
       shift 2
       ;;
+    --client)
+      [[ $# -ge 2 ]] || { echo "Missing value for --client" >&2; exit 1; }
+      CLIENT_REQUEST="$2"
+      shift 2
+      ;;
     -h|--help)
       cat <<'USAGE'
 Usage:
-  maintain-auto-memory.sh [--event <name>]
+  maintain-auto-memory.sh [--event <name>] [--client auto|codex|claude|both|generic]
 
 Options:
   --event <name>   Optional lifecycle event label for logging
@@ -35,6 +41,11 @@ USAGE
       ;;
   esac
 done
+
+CLIENT="$(pensieve_client "$CLIENT_REQUEST" "$SCRIPT_DIR")"
+if ! client_includes "$CLIENT" claude; then
+  exit 0
+fi
 
 SKILL_ROOT="$(skill_root_from_script "$SCRIPT_DIR")"
 MEMORY_FILE="$(auto_memory_file)"

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Maintain generated Pensieve project state.md and Claude auto memory guidance.
+# Maintain generated Pensieve project state.md and client-specific guidance.
 #
 # Usage:
 #   maintain-project-state.sh --event <install|upgrade|migrate|doctor|self-improve|sync> [--note "..."]
@@ -11,6 +11,7 @@ source "$SCRIPT_DIR/lib.sh"
 
 EVENT=""
 NOTE=""
+CLIENT_REQUEST="${PENSIEVE_CLIENT:-auto}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -24,14 +25,20 @@ while [[ $# -gt 0 ]]; do
       NOTE="$2"
       shift 2
       ;;
+    --client)
+      [[ $# -ge 2 ]] || { echo "Missing value for --client" >&2; exit 1; }
+      CLIENT_REQUEST="$2"
+      shift 2
+      ;;
     -h|--help)
       cat <<'USAGE'
 Usage:
-  maintain-project-state.sh --event <install|upgrade|migrate|doctor|self-improve|sync> [--note "..."]
+  maintain-project-state.sh --event <install|upgrade|migrate|doctor|self-improve|sync> [--note "..."] [--client <name>]
 
 Options:
   --event <name>   Lifecycle event to record
   --note <text>    Optional one-line note
+  --client <name>  auto | codex | claude | both | generic
   -h, --help       Show help
 USAGE
       exit 0
@@ -57,6 +64,9 @@ case "$EVENT" in
     ;;
 esac
 
+CLIENT="$(pensieve_client "$CLIENT_REQUEST" "$SCRIPT_DIR")"
+export PENSIEVE_CLIENT="$CLIENT"
+
 PROJECT_ROOT="$(project_root)" || exit 1
 PROJECT_ROOT="$(to_posix_path "$PROJECT_ROOT")"
 validate_project_root "$PROJECT_ROOT"
@@ -67,6 +77,30 @@ GRAPH_FILE="$(project_graph_file)"
 SKILL_ROOT="$(skill_root_from_script "$SCRIPT_DIR")"
 GRAPH_SCRIPT="$SKILL_ROOT/.src/scripts/generate-user-data-graph.sh"
 AUTO_MEMORY_SCRIPT="$SKILL_ROOT/.src/scripts/maintain-auto-memory.sh"
+
+LOCK_DIR="$STATE_ROOT/.maintain.lock.d"
+LOCK_KIND=""
+release_maintenance_lock() {
+  if [[ "$LOCK_KIND" == "mkdir" ]]; then
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+  fi
+}
+trap release_maintenance_lock EXIT
+
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"$STATE_ROOT/.maintain.lock"
+  flock -w 30 9 || { echo "Timed out waiting for Pensieve maintenance lock" >&2; exit 1; }
+  LOCK_KIND="flock"
+else
+  for _lock_attempt in $(seq 1 600); do
+    if mkdir "$LOCK_DIR" 2>/dev/null; then
+      LOCK_KIND="mkdir"
+      break
+    fi
+    sleep 0.05
+  done
+  [[ "$LOCK_KIND" == "mkdir" ]] || { echo "Timed out waiting for Pensieve maintenance lock" >&2; exit 1; }
+fi
 
 mkdir -p "$USER_DATA_ROOT"/{maxims,decisions,knowledge,pipelines}
 mkdir -p "$USER_DATA_ROOT"/short-term/{maxims,decisions,knowledge,pipelines}
@@ -81,13 +115,17 @@ ensure_python_env
 [[ -n "${PYTHON_BIN:-}" ]] || { echo "Python not found" >&2; exit 1; }
 TODAY_UTC="$(date -u +"%Y-%m-%d")"
 
-"$PYTHON_BIN" - "$STATE_FILE" "$GRAPH_FILE" "$EVENT" "$TODAY_UTC" "$PROJECT_ROOT" "$USER_DATA_ROOT" "$STATE_ROOT" "$NOTE" <<'PY'
+"$PYTHON_BIN" - "$STATE_FILE" "$GRAPH_FILE" "$EVENT" "$TODAY_UTC" "$PROJECT_ROOT" "$USER_DATA_ROOT" "$STATE_ROOT" "$NOTE" "$SKILL_ROOT" <<'PY'
 from __future__ import annotations
 
 import datetime as dt
 import re
 import sys
 from pathlib import Path
+
+skill_root = Path(sys.argv[9])
+sys.path.insert(0, str(skill_root / ".src" / "core"))
+from hook_runtime import write_text_atomic_if_changed
 
 state_file = Path(sys.argv[1])
 graph_file = Path(sys.argv[2])
@@ -221,7 +259,7 @@ if state_file.exists():
         ],
     )
 
-    state_file.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    write_text_atomic_if_changed(state_file, "\n".join(lines).rstrip() + "\n")
 else:
     content = f"""# Pensieve Project State
 
@@ -242,16 +280,15 @@ else:
 
 {graph_markdown}
 """
-    state_file.parent.mkdir(parents=True, exist_ok=True)
-    state_file.write_text(content.rstrip() + "\n", encoding="utf-8")
+    write_text_atomic_if_changed(state_file, content.rstrip() + "\n")
 PY
 
 echo "✅ Pensieve project state updated"
 echo "  - state: $STATE_FILE"
 echo "  - graph: $GRAPH_FILE"
 
-if [[ -x "$AUTO_MEMORY_SCRIPT" ]]; then
-  if ! bash "$AUTO_MEMORY_SCRIPT" --event "$EVENT"; then
+if client_includes "$CLIENT" claude && [[ -x "$AUTO_MEMORY_SCRIPT" ]]; then
+  if ! bash "$AUTO_MEMORY_SCRIPT" --client "$CLIENT" --event "$EVENT"; then
     echo "⚠️  Auto memory update skipped: failed to run maintain-auto-memory.sh" >&2
   fi
 fi
