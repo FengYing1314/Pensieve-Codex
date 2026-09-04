@@ -104,7 +104,9 @@ Removing the plugin or Skill does not imply permission to remove project `.pensi
 | Purpose | Claude Code | Codex |
 |---|---|---|
 | Session health and due reminder | `SessionStart` | `SessionStart` |
-| Subagent recall | `PreToolUse Agent` | `SubagentStart` |
+| Subagent recall | `SubagentStart` | `SubagentStart` |
 | Knowledge-state refresh | `PostToolUse Write/Edit/MultiEdit` | `PostToolUse Edit|Write` |
 
 Both adapters call `.src/core/hook_runtime.py`; provider envelopes differ, semantic outcomes do not.
+
+The Claude adapter still accepts the historical `PreToolUse Agent` envelope so existing installations degrade safely until `install-hooks.sh` is rerun. New installs use only native `SubagentStart` and do not grant tool permissions.

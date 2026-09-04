@@ -62,7 +62,7 @@ The packaging follows OpenAI's [Claude plugin migration guidance](https://develo
 |---|---|---|---|
 | Skill entry | Root `SKILL.md` | `skills/pensieve` | Same seven tool specifications under `.src/` |
 | Session reminder | `SessionStart` | `SessionStart` | Same health/version/short-term decision |
-| Subagent recall | `PreToolUse Agent` | `SubagentStart` + `pensieve-wand` | Same compact recall guidance |
+| Subagent recall | native `SubagentStart` + optional `pensieve-wand` agent | native `SubagentStart` + `pensieve-wand` Skill | Same compact recall guidance |
 | Edit synchronization | `Write/Edit/MultiEdit` file paths | `apply_patch` command paths | Same five data directories and state refresh |
 | Instruction entry | `CLAUDE.md` + optional `MEMORY.md` | `AGENTS.md` + native Skill | Client-specific files never leak across modes |
 | Hooks unavailable | Manual tools | Manual tools | Core workflow remains complete |
@@ -117,7 +117,7 @@ PENSIEVE_CLIENT=codex PENSIEVE_SKILL_ROOT="$HOME/plugins/pensieve" \
 
 ### Claude Code skill
 
-The root Skill entry and historical Hook script paths remain compatible:
+The root Skill entry and historical Hook script paths remain compatible. The installer uses Claude's native `SubagentStart`; rerunning it removes only legacy Pensieve `PreToolUse Agent` entries and preserves unrelated hooks:
 
 ```bash
 git clone -b feat/codex-native-plugin https://github.com/FengYing1314/Pensieve.git "$HOME/.claude/skills/pensieve"
@@ -136,10 +136,10 @@ Clone to the client-specific skill directory, set `PENSIEVE_SKILL_ROOT`, and pas
 Commands accept `--client auto|codex|claude|both|generic`. `agents` and `agent` remain compatibility aliases for `codex` where an instruction target is accepted.
 
 - `codex` reads or writes `AGENTS.md` integration only and never creates Claude `MEMORY.md`.
-- `claude` reads or writes `CLAUDE.md` and Claude project memory only; it does not require `AGENTS.md`.
+- `claude` reads or writes `CLAUDE.md` and an optional Claude routing index only; `.pensieve/` remains the sole knowledge authority and it does not require `AGENTS.md`.
 - `both` explicitly enables both integrations.
 - `generic` checks only provider-neutral project data.
-- `auto` uses Hook-provided identity, client environment variables, and the installation path; it never silently chooses `both`.
+- `auto` uses Hook-provided identity, client environment variables, and the installation path; Codex's native `PLUGIN_ROOT` wins its `CLAUDE_PLUGIN_ROOT` compatibility alias, and auto never silently chooses `both`.
 
 Doctor reports missing client integration as `SHOULD_FIX` by default. Use `--require-integration` when CI or rollout policy requires it to fail:
 
@@ -148,7 +148,7 @@ bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-doctor.sh" --client codex --strict
 bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-doctor.sh" --client codex --strict --require-integration
 ```
 
-Use `sync-instructions` to repair only the relevant instruction file:
+`sync-instructions` defaults to the selected client's file. Use explicit targets when repairing a particular integration:
 
 ```bash
 bash "$PENSIEVE_SKILL_ROOT/.src/scripts/sync-instructions.sh" --client codex --target codex
@@ -174,7 +174,7 @@ If any backup fails verification, cleanup stops before deleting legacy data.
 
 ## Safe upgrades
 
-The upgrade tool requires a clean Git checkout and only runs `git pull --ff-only`. Dirty, non-Git, and non-fast-forward states stop safely; it never resets or rewrites local history.
+The upgrade tool requires the exact root of a clean, structurally valid Pensieve Git checkout and only runs `git pull --ff-only`. Dirty, unrelated, nested, non-Git, and non-fast-forward states stop safely; it never resets or rewrites local history.
 
 ```bash
 bash "$PENSIEVE_SKILL_ROOT/.src/scripts/run-upgrade.sh" --client claude

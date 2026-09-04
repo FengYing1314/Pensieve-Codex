@@ -20,6 +20,9 @@
 - Bundled seeds become project-owned after creation; customization is not treated as corruption
 - State, marker, reports, and graph outputs use atomic replacement; Hook-driven state maintenance is serialized
 - Project detection prefers the nearest `.pensieve/` and supports non-Git projects and Unicode paths
+- Claude recall uses native `SubagentStart`; the legacy `PreToolUse Agent` envelope remains a no-permission compatibility path
+- Instruction sync defaults to the active client, preserves existing file permissions, and skips unchanged writes
+- Claude's optional wand agent treats `.pensieve/` as the sole knowledge authority instead of creating a second agent-memory store
 
 ### Safety
 
@@ -27,6 +30,7 @@
 - Migration dry-run performs zero writes
 - Upgrade refuses dirty/non-Git checkouts and only uses `git pull --ff-only`; hard-reset fallback was removed
 - Installed Codex snapshots direct upgrades to a clean source checkout followed by marketplace reinstallation
+- Upgrade validates the exact Pensieve checkout root; migration conflict copies use collision-safe names
 
 ## v2.0.0 — User-Level System + Project-Level Data
 
