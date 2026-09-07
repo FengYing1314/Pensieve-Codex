@@ -76,49 +76,6 @@ if [[ ! -d "$PIPELINES_DIR" ]]; then
   exit 1
 fi
 
-pipeline_exists() {
-  [[ -f "$PIPELINES_DIR/$1.md" ]]
-}
-
-build_instruction_block() {
-  local routes=()
-
-  if pipeline_exists "run-when-committing"; then
-    routes+=("- Commit requests (\`commit\`, \`git commit\`): use \`.pensieve/pipelines/run-when-committing.md\`. Check staged diff, decide whether reusable insight should be captured, then make atomic commits.")
-  fi
-
-  if pipeline_exists "run-when-refactoring"; then
-    routes+=("- Refactor requests (\`refactor\`, \`large refactor\`, \`split code\`): use \`.pensieve/pipelines/run-when-refactoring.md\`. Confirm the real problem, fix upstream data authority first, split large work into 2-3 user-visible steps, delete old paths when new paths work, and avoid compatibility/fallback branches.")
-  fi
-
-  if pipeline_exists "run-when-reviewing-code"; then
-    routes+=("- Review requests (\`review\`, \`code review\`, \`inspect code\`): use \`.pensieve/pipelines/run-when-reviewing-code.md\`. Start from git history and changed hot spots, verify candidate issues, and report only high-signal findings with evidence and file locations.")
-  fi
-
-  if [[ "${#routes[@]}" -eq 0 ]]; then
-    echo "No supported pipeline files found in: $PIPELINES_DIR" >&2
-    echo "Expected run-when-committing.md, run-when-refactoring.md, or run-when-reviewing-code.md." >&2
-    return 1
-  fi
-
-  cat <<EOF
-$START_MARKER
-## How To Use Pensieve
-
-Use \`.pensieve/\` as the first source of architectural intent.
-
-- \`maxims/\` are active engineering rules.
-- \`decisions/\` are active project decisions.
-- \`knowledge/\` explains boundary maps and debugging paths.
-- \`pipelines/\` gives executable workflows.
-
-Use these project pipelines directly when trigger words match; do not rediscover them through skills first.
-
-$(printf '%s\n' "${routes[@]}")
-$END_MARKER
-EOF
-}
-
 resolve_target_path() {
   local raw="$1"
   raw="$(to_posix_path "$raw")"
@@ -178,119 +135,68 @@ collect_targets() {
   printf '%s\n' "${targets[@]}"
 }
 
-sync_target_file() {
-  local target="$1"
-  local block_file="$2"
-  local out_file existed start_count end_count status
-
-  existed=0
-  [[ -f "$target" ]] && existed=1
-
-  out_file="$(mktemp)"
-  if [[ "$existed" -eq 0 || ! -s "$target" ]]; then
-    cp "$block_file" "$out_file"
-  else
-    start_count="$(grep -Fxc "$START_MARKER" "$target" || true)"
-    end_count="$(grep -Fxc "$END_MARKER" "$target" || true)"
-
-    if [[ "$start_count" -ne "$end_count" ]]; then
-      rm -f "$out_file"
-      echo "Malformed Pensieve instruction block in $target" >&2
-      echo "Expected matching $START_MARKER and $END_MARKER markers." >&2
-      return 1
-    fi
-    if [[ "$start_count" -gt 1 ]]; then
-      rm -f "$out_file"
-      echo "Malformed Pensieve instruction block in $target" >&2
-      echo "Expected at most one $START_MARKER marker." >&2
-      return 1
-    fi
-
-    if [[ "$start_count" -gt 0 ]]; then
-      awk -v start="$START_MARKER" -v end="$END_MARKER" -v block_file="$block_file" '
-        BEGIN {
-          while ((getline line < block_file) > 0) {
-            block = block line ORS
-          }
-          close(block_file)
-          in_block = 0
-        }
-        $0 == start {
-          printf "%s", block
-          in_block = 1
-          next
-        }
-        in_block {
-          if ($0 == end) {
-            in_block = 0
-          }
-          next
-        }
-        {
-          print
-        }
-      ' "$target" > "$out_file"
-    else
-      cp "$target" "$out_file"
-      printf '\n' >> "$out_file"
-      cat "$block_file" >> "$out_file"
-    fi
-  fi
-
-  if ! status="$("$PYTHON_BIN" - "$target" "$out_file" "$SCRIPT_DIR/../core" <<'PY'
-from pathlib import Path
-import sys
-
-target = Path(sys.argv[1])
-candidate = Path(sys.argv[2])
-sys.path.insert(0, sys.argv[3])
-from hook_runtime import write_text_atomic_if_changed
-
-existed = target.is_file()
-changed = write_text_atomic_if_changed(target, candidate.read_text(encoding="utf-8"))
-print("unchanged" if not changed else ("updated" if existed else "created"))
-PY
-  )"; then
-    rm -f "$out_file"
-    return 1
-  fi
-  rm -f "$out_file"
-  echo "$status"
-}
-
 ensure_python_env
 [[ -n "${PYTHON_BIN:-}" ]] || { echo "Python not found" >&2; exit 1; }
 
-BLOCK_FILE="$(mktemp)"
-cleanup_sync_block() {
-  rm -f "$BLOCK_FILE"
-}
-trap cleanup_sync_block EXIT
-build_instruction_block > "$BLOCK_FILE"
-
 TARGETS=()
+TARGET_TEXT="$(collect_targets)"
 while IFS= read -r target; do
   [[ -n "$target" ]] && TARGETS+=("$target")
-done < <(collect_targets)
+done <<< "$TARGET_TEXT"
 if [[ "${#TARGETS[@]}" -eq 0 ]]; then
   echo "No instruction targets resolved. Use --client codex|claude|both or an explicit --target/--file." >&2
   exit 1
 fi
 
-echo "✅ Pensieve instruction sync completed"
-echo "  - pipelines: $PIPELINES_DIR"
-echo "  - targets:"
+"$PYTHON_BIN" - "$SCRIPT_DIR" "$DATA_ROOT" "$CLIENT" "${TARGETS[@]}" <<'SYNC_PY'
+from pathlib import Path
+import os
+import signal
+import subprocess
+import sys
 
-for target in "${TARGETS[@]}"; do
-  status="$(sync_target_file "$target" "$BLOCK_FILE")"
-  rel="${target#$PROJECT_ROOT/}"
-  echo "    - $rel: $status"
-done
+script_dir = Path(sys.argv[1])
+data_root = Path(sys.argv[2])
+client = sys.argv[3]
+sys.path.insert(0, str(script_dir.parent / "core"))
+from pensieve_core import sync_instruction_targets, InstructionSyncError
 
-rm -f "$BLOCK_FILE"
-trap - EXIT
 
-MARKER_SCRIPT="$SCRIPT_DIR/pensieve-session-marker.sh"
-if [[ -f "$MARKER_SCRIPT" ]]; then
-  bash "$MARKER_SCRIPT" --client "$CLIENT" --mode record --event sync-instructions || true
-fi
+try:
+    results = sync_instruction_targets(data_root, [Path(raw) for raw in sys.argv[4:]])
+except InstructionSyncError as exc:
+    sys.exit(str(exc))
+written = any(status != "unchanged" for _, status in results)
+
+
+print("Pensieve instruction sync completed")
+for target, status in results:
+    print(f"  - {target.name}: {status}")
+marker = script_dir / "pensieve-session-marker.sh"
+if written and marker.is_file():
+    try:
+        with subprocess.Popen(
+            ["bash", str(marker), "--client", client, "--mode", "record", "--event", "sync-instructions"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=(os.name == "posix"),
+        ) as process:
+            try:
+                returncode = process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                # 结束整个维护进程组，避免等待锁的子进程稍后继续写入。
+                if os.name == "posix":
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                else:
+                    process.kill()
+                process.wait()
+                print("Instruction files were synced, but the session marker refresh timed out after 10 seconds.", file=sys.stderr)
+            else:
+                if returncode:
+                    print("Instruction files were synced, but the session marker could not be refreshed.", file=sys.stderr)
+    except OSError:
+        print("Instruction files were synced, but the session marker could not be refreshed.", file=sys.stderr)
+SYNC_PY

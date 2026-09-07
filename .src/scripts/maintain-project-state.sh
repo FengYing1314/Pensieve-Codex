@@ -12,9 +12,14 @@ source "$SCRIPT_DIR/lib.sh"
 EVENT=""
 NOTE=""
 CLIENT_REQUEST="${PENSIEVE_CLIENT:-auto}"
+PROJECT_ONLY=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --project-only)
+      PROJECT_ONLY=1
+      shift
+      ;;
     --event)
       [[ $# -ge 2 ]] || { echo "Missing value for --event" >&2; exit 1; }
       EVENT="$2"
@@ -39,6 +44,7 @@ Options:
   --event <name>   Lifecycle event to record
   --note <text>    Optional one-line note
   --client <name>  auto | codex | claude | both | generic
+  --project-only  Refresh existing project state only; reject redirected outputs and skip client indexes
   -h, --help       Show help
 USAGE
       exit 0
@@ -71,12 +77,31 @@ PROJECT_ROOT="$(project_root)" || exit 1
 PROJECT_ROOT="$(to_posix_path "$PROJECT_ROOT")"
 validate_project_root "$PROJECT_ROOT"
 USER_DATA_ROOT="$(user_data_root)"
-STATE_ROOT="$(ensure_state_dir "$(state_root)")"
+STATE_ROOT="$(state_root)"
 STATE_FILE="$(project_state_file)"
 GRAPH_FILE="$(project_graph_file)"
 SKILL_ROOT="$(skill_root_from_script "$SCRIPT_DIR")"
 GRAPH_SCRIPT="$SKILL_ROOT/.src/scripts/generate-user-data-graph.sh"
 AUTO_MEMORY_SCRIPT="$SKILL_ROOT/.src/scripts/maintain-auto-memory.sh"
+
+if [[ "$PROJECT_ONLY" -eq 1 ]]; then
+  [[ -x "$GRAPH_SCRIPT" ]] || { echo "Project-only refresh refused before writing: graph generator is missing or not executable" >&2; exit 1; }
+  ensure_python_env
+  [[ -n "${PYTHON_BIN:-}" ]] || { echo "Python not found" >&2; exit 1; }
+  "$PYTHON_BIN" - "$PROJECT_ROOT" "$USER_DATA_ROOT" "$STATE_ROOT" "$SKILL_ROOT/.src/core" <<'CHECK_PATHS'
+from pathlib import Path
+import sys
+
+sys.path.insert(0, sys.argv[4])
+from hook_runtime import validate_project_state_paths
+
+try:
+    validate_project_state_paths(*(Path(raw) for raw in sys.argv[1:4]))
+except (OSError, ValueError, RuntimeError) as exc:
+    sys.exit(f"Project-only refresh refused before writing: {exc}")
+CHECK_PATHS
+fi
+STATE_ROOT="$(ensure_state_dir "$STATE_ROOT")"
 
 LOCK_DIR="$STATE_ROOT/.maintain.lock.d"
 LOCK_KIND=""
@@ -102,12 +127,15 @@ else
   [[ "$LOCK_KIND" == "mkdir" ]] || { echo "Timed out waiting for Pensieve maintenance lock" >&2; exit 1; }
 fi
 
-mkdir -p "$USER_DATA_ROOT"/{maxims,decisions,knowledge,pipelines}
-mkdir -p "$USER_DATA_ROOT"/short-term/{maxims,decisions,knowledge,pipelines}
+if [[ "$PROJECT_ONLY" -eq 0 ]]; then
+  mkdir -p "$USER_DATA_ROOT"/{maxims,decisions,knowledge,pipelines}
+  mkdir -p "$USER_DATA_ROOT"/short-term/{maxims,decisions,knowledge,pipelines}
+fi
 
 if [[ -x "$GRAPH_SCRIPT" ]]; then
   bash "$GRAPH_SCRIPT" --root "$USER_DATA_ROOT" --output "$GRAPH_FILE" >/dev/null
 else
+  [[ "$PROJECT_ONLY" -eq 0 ]] || { echo "Project-only refresh failed: graph generator became unavailable" >&2; exit 1; }
   printf '%s\n' "_(graph not generated yet)_" > "$GRAPH_FILE"
 fi
 
@@ -287,7 +315,7 @@ echo "✅ Pensieve project state updated"
 echo "  - state: $STATE_FILE"
 echo "  - graph: $GRAPH_FILE"
 
-if client_includes "$CLIENT" claude && [[ -x "$AUTO_MEMORY_SCRIPT" ]]; then
+if [[ "$PROJECT_ONLY" -eq 0 ]] && client_includes "$CLIENT" claude && [[ -x "$AUTO_MEMORY_SCRIPT" ]]; then
   if ! bash "$AUTO_MEMORY_SCRIPT" --client "$CLIENT" --event "$EVENT"; then
     echo "⚠️  Auto memory update skipped: failed to run maintain-auto-memory.sh" >&2
   fi

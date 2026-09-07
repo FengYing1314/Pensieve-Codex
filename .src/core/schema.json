@@ -38,19 +38,7 @@
   },
   "instructions": {
     "start_marker": "<!-- pensieve:instructions:start -->",
-    "end_marker": "<!-- pensieve:instructions:end -->",
-    "required_fragments": [
-      "## How To Use Pensieve",
-      "Use `.pensieve/` as the first source of architectural intent.",
-      "`maxims/` are active engineering rules.",
-      "`decisions/` are active project decisions.",
-      "`knowledge/` explains boundary maps and debugging paths.",
-      "`pipelines/` gives executable workflows.",
-      "Use these project pipelines directly when trigger words match; do not rediscover them through skills first.",
-      "use `.pensieve/pipelines/run-when-committing.md`",
-      "use `.pensieve/pipelines/run-when-refactoring.md`",
-      "use `.pensieve/pipelines/run-when-reviewing-code.md`"
-    ]
+    "end_marker": "<!-- pensieve:instructions:end -->"
   },
   "integrations": {
     "claude": {

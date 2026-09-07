@@ -1,11 +1,9 @@
 ---
 name: pensieve
 description: >-
-  Project knowledge base and workflow router for Codex. Use .pensieve/ knowledge
-  to reuse explored file locations and call chains; follow established decisions
-  and maxims; run matching pipelines; stage new conclusions in short-term/. Routes
-  seven tools: init, upgrade, migrate, doctor, self-improve, refine, and
-  sync-instructions.
+  Retrieve and maintain project-local Pensieve knowledge. Use for relevant project
+  memory lookup, explicitly requested maintenance, or enabled factual capture
+  after implementation; route the seven existing lifecycle workflows.
 ---
 
 # Pensieve for Codex
@@ -13,6 +11,8 @@ description: >-
 This is a thin Codex entry point. The shared implementation lives at the plugin root in `.src/`; do not copy it into this skill.
 
 Resolve the plugin root as two directories above this `SKILL.md`, export it as `PENSIEVE_SKILL_ROOT`, and set `PENSIEVE_CLIENT=codex` for every command. Never fall back to a Claude installation path from this adapter.
+
+Current requests and authorization control scope. Retrieval never authorizes maintenance. Decide whether the completed implementation established a reusable project fact before loading capture instructions; routine mechanical edits with no new fact skip capture and memory scans. For enabled factual closeout, read `../../.src/tools/self-improve.md`; create new draft facts only, without changing existing memory or Git state.
 
 ## Routing
 

@@ -32,7 +32,7 @@ File naming follows the same convention as the corresponding long-term directory
 - Based on: [[short-term/decisions/2026-03-16-foo]]  ❌
 ```
 
-When the graph resolver processes files inside short-term it strips the prefix, sharing node IDs with long-term files.
+When the graph resolver processes files inside short-term it strips the prefix, sharing node IDs with long-term files. Knowledge references include the file component: `[[knowledge/topic/content]]`. Verify the actual original file when adding a reference. Aged short-term entries can be omitted from the graph; use a normal relative Markdown file link for direct access to such an original, rather than treating a missing graph node as proof that the source does not exist.
 On promote you only need to `mv` the file -- zero reference updates required.
 
 ## TTL rules
@@ -43,5 +43,7 @@ On promote you only need to `mv` the file -- zero reference updates required.
 
 ## When to skip short-term
 
-- Modifying a file that already exists in a long-term directory: edit it in place
+- Explicitly requested maintenance of an existing long-term file: edit within that requested scope. Automatic implementation closeout never uses this exception.
 - The user explicitly requests writing directly to a long-term directory
+
+Automatic capture creates new draft knowledge only. Existing short-term entries are not rewritten to update dates or content. Use unique directory names and IDs across both layers for conflicting candidates; inspect original files because the graph can omit aged short-term entries.

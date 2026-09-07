@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -57,28 +58,42 @@ def maintain_project(client: str, project_root: Path, paths: tuple[str, ...], to
         {
             "PENSIEVE_CLIENT": client,
             "PENSIEVE_PROJECT_ROOT": str(project_root),
+            "PENSIEVE_DATA_ROOT": str(project_root / ".pensieve"),
+            "PENSIEVE_STATE_ROOT": str(project_root / ".pensieve" / ".state"),
             "PENSIEVE_SKILL_ROOT": str(SKILL_ROOT),
         }
     )
     try:
-        completed = subprocess.run(
-            ["bash", str(maintain), "--client", client, "--event", "sync", "--note", note],
+        with subprocess.Popen(
+            ["bash", str(maintain), "--client", client, "--project-only", "--event", "sync", "--note", note],
             env=env,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            check=False,
-            timeout=25,
-        )
-    except (OSError, subprocess.TimeoutExpired):
+            start_new_session=(os.name == "posix"),
+        ) as process:
+            try:
+                return process.wait(timeout=25) == 0
+            except subprocess.TimeoutExpired:
+                # 同时结束维护子进程，避免 Hook 返回失败后发生迟到写入。
+                if os.name == "posix":
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                else:
+                    process.kill()
+                process.wait()
+                return False
+    except OSError:
         return False
-    return completed.returncode == 0
 
 
 def output_maintenance_warning(client: str) -> None:
     message = (
         "[Pensieve] Automatic project-state refresh failed after a memory edit. "
-        f"Run pensieve doctor for the {client} client to refresh the graph and diagnose the failure."
+        f"Continue the original task; do not retry or run Doctor automatically for the {client} client. "
+        "Further repair requires an explicit maintenance request."
     )
     output_json(
         {
@@ -155,6 +170,6 @@ if __name__ == "__main__":
         # Hooks are optional integration. A malformed payload or local runtime issue
         # must never block the user's editing flow.
         sys.stderr.write(
-            "[Pensieve] Optional hook failed. Run pensieve doctor to refresh project state and inspect the installation.\n"
+            "[Pensieve] Optional hook failed. Continue the task; do not retry maintenance or run Doctor automatically.\n"
         )
         raise SystemExit(0)

@@ -1,17 +1,17 @@
 # Maxims
 
-Cross-project, cross-problem, long-term MUST-level rules.
+Recorded engineering constraints with explicit applicability, evidence, and exceptions. Broad usefulness alone does not make a preference universally mandatory.
 
 ## Criteria for inclusion
 
 Only entries that satisfy all of the following belong in `maxims/`:
 
-1. Still holds when switching projects
-2. Still holds when switching languages
-3. Violating it significantly increases regression risk
-4. Can be stated in one sentence
+1. Has a clear, supported scope and evidence
+2. Distinguishes requirements from preferences and examples
+3. Explains the concrete failure prevented and any necessary exceptions
+4. Is explicitly adopted within its stated scope rather than inferred from a few observations
 
-If it is only valid in the current project, it is not a `maxim` — it is a `decision`.
+Project-specific trade-offs belong in `decisions/`; do not reclassify them merely to make them harder to override.
 
 ## Storage location
 

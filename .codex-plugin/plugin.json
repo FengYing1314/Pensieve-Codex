@@ -1,6 +1,6 @@
 {
   "name": "pensieve",
-  "version": "1.4.0",
+  "version": "1.4.0+codex.20260907222457",
   "description": "Project knowledge, decisions, maxims, and reusable workflow routing for Codex and Claude Code.",
   "author": {
     "name": "FengYing1314",
@@ -9,7 +9,13 @@
   "homepage": "https://github.com/FengYing1314/Pensieve",
   "repository": "https://github.com/FengYing1314/Pensieve",
   "license": "MIT",
-  "keywords": ["knowledge", "memory", "workflow", "codex", "claude-code"],
+  "keywords": [
+    "knowledge",
+    "memory",
+    "workflow",
+    "codex",
+    "claude-code"
+  ],
   "skills": "./skills/",
   "interface": {
     "displayName": "Pensieve",
@@ -17,7 +23,11 @@
     "longDescription": "Use project-local knowledge, decisions, maxims, short-term notes, and reusable pipelines from Codex or Claude Code through one shared runtime.",
     "developerName": "FengYing1314",
     "category": "Productivity",
-    "capabilities": ["Project memory", "Workflow routing", "Lifecycle hooks"],
+    "capabilities": [
+      "Project memory",
+      "Workflow routing",
+      "Lifecycle hooks"
+    ],
     "defaultPrompt": [
       "Use Pensieve to recall this project's architecture before making changes.",
       "Run a Pensieve doctor check for this project.",

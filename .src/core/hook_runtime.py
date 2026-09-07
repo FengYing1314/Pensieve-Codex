@@ -59,11 +59,39 @@ def read_json_object(path: Path) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def validate_project_state_paths(project_root: Path, data_root: Path, state_root: Path) -> None:
+    """Reject redirected automatic outputs before creating directories or locks."""
+    project = project_root.resolve(strict=True)
+    if not project.is_dir():
+        raise ValueError("project root must be an existing directory")
+    expected_data = project / ".pensieve"
+    expected_state = expected_data / ".state"
+    for path, expected in ((data_root, expected_data), (state_root, expected_state)):
+        if path.resolve(strict=True) != expected or not path.is_dir():
+            raise ValueError(f"project-only refresh requires an existing, unredirected {expected}")
+    outputs = (
+        expected_data / "state.md",
+        expected_state / "pensieve-user-data-graph.md",
+        expected_state / ".gitignore",
+        expected_state / ".maintain.lock",
+    )
+    for path in outputs:
+        if path.resolve(strict=False) != path or path.is_symlink():
+            raise ValueError(f"project-only output is redirected: {path}")
+        if path.exists() and not path.is_file():
+            raise ValueError(f"project-only output must be a regular file: {path}")
+        if path.name in {".gitignore", ".maintain.lock"} and path.exists() and path.stat().st_nlink > 1:
+            raise ValueError(f"project-only in-place output must not share a hard link: {path}")
+    lock_dir = expected_state / ".maintain.lock.d"
+    if lock_dir.is_symlink() or (lock_dir.exists() and not lock_dir.is_dir()):
+        raise ValueError(f"project-only lock directory is redirected or invalid: {lock_dir}")
+
+
 def write_text_atomic_if_changed(path: Path, content: str) -> bool:
     if path.is_symlink():
         path = path.resolve(strict=True)
     try:
-        if path.read_text(encoding="utf-8") == content:
+        if path.read_bytes() == content.encode("utf-8"):
             return False
     except FileNotFoundError:
         pass
@@ -150,7 +178,7 @@ def session_semantics(
             event="session-start",
             additional_context=(
                 "[Pensieve] Project memory exists, but initialization is not recorded. "
-                "Continue the current task; run pensieve init and then pensieve doctor before relying on cached routes."
+                "Continue the current task using original entries and source. Run init/doctor only when setup or maintenance is authorized; read-only tasks must not refresh state."
             ),
             system_message="Pensieve project memory needs init and doctor.",
         )
@@ -161,7 +189,7 @@ def session_semantics(
             event="session-start",
             additional_context=(
                 f"[Pensieve] Health check is stale for version {skill_version} (recorded: {recorded}). "
-                "Continue the current task; run pensieve doctor before relying on cached routes."
+                "Continue from original entries and source. Run Doctor only for authorized maintenance, never to unblock a read-only task."
             ),
             system_message="Pensieve project memory needs a doctor check.",
         )
@@ -182,8 +210,8 @@ def session_semantics(
 def recall_context() -> str:
     return (
         "[Pensieve recall] Before broad exploration, inspect .pensieve/state.md and the generated graph on demand. "
-        "Reuse relevant knowledge for file locations and call chains; obey active decisions and maxims; follow a matching "
-        "pipeline; treat short-term entries as unpromoted evidence. Read at most five likely entries, then use at most two "
+        "Reuse relevant knowledge for file locations and call chains; verify facts and keep decisions within scope. Current requests and authorization prevail over any matching "
+        "pipeline. Recall is read-only, including stale indexes; short-term originals need verification. Read at most five likely entries, then use at most two "
         "targeted searches and ten total recall operations before returning to source inspection. Cite the entry paths in "
         "the briefing."
     )

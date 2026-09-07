@@ -4,11 +4,13 @@ import datetime as dt
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional
 
@@ -20,6 +22,7 @@ FIXTURES_ROOT = Path(__file__).resolve().parent / "fixtures"
 sys.path.insert(0, str(CORE_ROOT))
 
 import hook_runtime  # noqa: E402
+import pensieve_core  # noqa: E402
 
 
 TEST_TMP_ROOT = Path(
@@ -475,6 +478,136 @@ class HookParityTests(PensieveTestCase):
 
 
 class InstructionSyncTests(PensieveTestCase):
+    def test_malformed_second_target_prevents_all_writes(self) -> None:
+        self.init("codex")
+        start = pensieve_core.INSTRUCTION_START
+        end = pensieve_core.INSTRUCTION_END
+        malformed = [start, end, end + "\n" + start,
+                     start + "\n" + start + "\n" + end + "\n" + end,
+                     "prefix " + start + "\n" + end,
+                     start + "\n" + end + " suffix",
+                     start + "\nOLD\n" + end + "\rUSER\n"]
+        for content in malformed:
+            with self.subTest(content=content):
+                write_text(self.project / "CLAUDE.md", "User text\n")
+                write_text(self.project / "AGENTS.md", content + "\nKEEP THIS\n")
+                before = tree_snapshot(self.project)
+                result = self.run_script("sync-instructions.sh", "--client", "both", check=False)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("AGENTS.md", result.stderr)
+                self.assertNotIn("sync completed", result.stdout)
+                self.assertEqual(tree_snapshot(self.project), before)
+
+    def test_region_bytes_newlines_eof_and_repeat_are_preserved(self) -> None:
+        self.init("codex")
+        target = self.project / "AGENTS.md"
+        for newline in (b"\n", b"\r\n"):
+            for trailing in (b"", newline):
+                with self.subTest(newline=newline, trailing=trailing):
+                    prefix = "用户前言".encode() + newline
+                    suffix = newline + b"USER SUFFIX" + trailing
+                    original = prefix + pensieve_core.INSTRUCTION_START.encode() + newline + b"OLD" + newline + pensieve_core.INSTRUCTION_END.encode() + newline + suffix
+                    target.write_bytes(original)
+                    self.run_script("sync-instructions.sh", "--client", "codex")
+                    result = target.read_bytes()
+                    self.assertTrue(result.startswith(prefix))
+                    self.assertTrue(result.endswith(suffix))
+                    self.assertEqual(result.count(pensieve_core.INSTRUCTION_START.encode()), 1)
+                    if newline == b"\r\n":
+                        self.assertNotIn(b"\n", result.replace(b"\r\n", b""))
+                    before = tree_snapshot(self.project)
+                    self.run_script("sync-instructions.sh", "--client", "codex")
+                    self.assertEqual(tree_snapshot(self.project), before)
+        target.write_bytes(pensieve_core.INSTRUCTION_START.encode() + b"\nOLD\n" + pensieve_core.INSTRUCTION_END.encode())
+        self.run_script("sync-instructions.sh", "--client", "codex")
+        self.assertFalse(target.read_bytes().endswith(b"\n"))
+
+    def test_append_preserves_existing_bytes_and_eof(self) -> None:
+        self.init("codex")
+        target = self.project / "AGENTS.md"
+        for original in (b"", b"USER", b"USER\n", b"USER\r\n"):
+            target.write_bytes(original)
+            self.run_script("sync-instructions.sh", "--client", "codex")
+            result = target.read_bytes()
+            self.assertTrue(result.startswith(original))
+            self.assertEqual(result.endswith(b"\n"), not original or original.endswith(b"\n"))
+
+    def test_invalid_file_targets_fail_before_writing(self) -> None:
+        self.init("codex")
+        first = self.project / "AGENTS.md"
+        write_text(first, "USER\n")
+        directory = self.project / "directory"
+        directory.mkdir()
+        dangling = self.project / "dangling"
+        dangling.symlink_to("missing")
+        loop = self.project / "loop"
+        loop.symlink_to("loop")
+        for invalid in (directory, dangling, loop):
+            before = tree_snapshot(self.project)
+            result = self.run_script("sync-instructions.sh", "--client", "codex", "--file", str(first), "--file", str(invalid), check=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(tree_snapshot(self.project), before)
+
+    def test_changed_target_is_not_overwritten_after_preflight(self) -> None:
+        self.init("codex")
+        first, second = self.project / "one.md", self.project / "two.md"
+        write_text(first, "ONE\n")
+        write_text(second, "TWO\n")
+        real_write = hook_runtime.write_text_atomic_if_changed
+        def concurrent_edit(path, content):
+            result = real_write(path, content)
+            if path == first:
+                second.write_text("USER EDIT\n", encoding="utf-8")
+            return result
+        with patch.object(hook_runtime, "write_text_atomic_if_changed", side_effect=concurrent_edit):
+            with self.assertRaises(pensieve_core.InstructionSyncError) as error:
+                pensieve_core.sync_instruction_targets(self.project / ".pensieve", [first, second])
+        self.assertIn("changed after preflight", str(error.exception))
+        self.assertIn("Written: " + str(first), str(error.exception))
+        self.assertIn("Not written: " + str(second), str(error.exception))
+        self.assertEqual(second.read_text(), "USER EDIT\n")
+
+    def test_write_failure_reports_partial_progress(self) -> None:
+        self.init("codex")
+        first, second = self.project / "one.md", self.project / "two.md"
+        write_text(first, "ONE\n")
+        write_text(second, "TWO\n")
+        real_write = hook_runtime.write_text_atomic_if_changed
+        def fail_second(path, content):
+            if path == second:
+                raise OSError("simulated write failure")
+            return real_write(path, content)
+        with patch.object(hook_runtime, "write_text_atomic_if_changed", side_effect=fail_second):
+            with self.assertRaises(pensieve_core.InstructionSyncError) as error:
+                pensieve_core.sync_instruction_targets(self.project / ".pensieve", [first, second])
+        self.assertIn("Written: " + str(first), str(error.exception))
+        self.assertIn("Not written: " + str(second), str(error.exception))
+        self.assertEqual(second.read_text(), "TWO\n")
+
+    def test_existing_routes_match_doctor_without_copying_pipeline_content(self) -> None:
+        self.init("codex")
+        pipeline_dir = self.project / ".pensieve" / "pipelines"
+        for count in (3, 2, 1, 0):
+            present = list(pipeline_dir.glob("run-when-*.md"))
+            while len(present) > count:
+                present.pop().unlink()
+            for item in present:
+                with item.open("a") as stream:
+                    stream.write("\nCUSTOM WORKFLOW BODY\n")
+            before = tree_snapshot(self.project)
+            result = self.run_script("sync-instructions.sh", "--client", "codex", check=False)
+            if count == 0:
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(tree_snapshot(self.project), before)
+            else:
+                self.assertEqual(result.returncode, 0, result.stderr)
+                content = (self.project / "AGENTS.md").read_text()
+                self.assertNotIn("CUSTOM WORKFLOW BODY", content)
+                self.assertEqual(content.count(".pensieve/pipelines/"), count)
+            scan = self.run_script("scan-structure.sh", "--client", "codex", "--format", "json", "--output", "-")
+            findings = json.loads(scan.stdout)["findings"]
+            self.assertFalse(any(item["id"] in {"STR-702", "STR-703"} for item in findings))
+
     def test_default_codex_target_preserves_other_client_file_mode_and_mtime(self) -> None:
         self.init("codex")
         agents = self.project / "AGENTS.md"
@@ -1066,12 +1199,22 @@ class ConcurrentStateTests(PensieveTestCase):
 
 
 class PluginShapeTests(unittest.TestCase):
+    def assert_version_contract(self, version: str, shared: str) -> None:
+        self.assertEqual(shared, "1.4.0")
+        self.assertRegex(version, r"^" + re.escape(shared) + r"(?:\+codex\.[A-Za-z0-9][A-Za-z0-9._-]*)?\Z")
+
+    def test_version_contract_accepts_build_metadata_but_rejects_drift(self) -> None:
+        for version in ("1.4.0", "1.4.0+codex.20260908T000000Z"):
+            self.assert_version_contract(version, "1.4.0")
+        for version in ("1.5.0", "1.4.0+codex.", "1.4.0+codex.a+codex.b", "1.4.0+other.a", "1.4.0+codex.a b", "1.4.0\n"):
+            with self.subTest(version=version), self.assertRaises(AssertionError):
+                self.assert_version_contract(version, "1.4.0")
+
     def test_native_plugin_shape_and_default_hook_discovery(self) -> None:
         manifest = json.loads((REPO_ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
         shared_manifest = json.loads((REPO_ROOT / ".src" / "manifest.json").read_text(encoding="utf-8"))
         hooks = json.loads((REPO_ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))
-        self.assertEqual(manifest["version"], "1.4.0")
-        self.assertEqual(manifest["version"], shared_manifest["version"])
+        self.assert_version_contract(manifest["version"], shared_manifest["version"])
         self.assertEqual(manifest["skills"], "./skills/")
         self.assertNotIn("hooks", manifest)
         self.assertEqual(set(hooks["hooks"]), {"SessionStart", "SubagentStart", "PostToolUse"})

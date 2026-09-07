@@ -215,10 +215,20 @@ Pensieve/
 
 Concurrent Hook updates serialize through a project lock. `state.md`, marker JSON, reports, and the knowledge graph use temporary-file replacement so interrupted or overlapping Hook processes cannot leave partial content.
 
+## Capture and synchronization boundaries
+
+Automatic implementation closeout is opt-in per maintained project. It adds only new draft facts under `short-term/knowledge/`, with evidence, applicability, and invalidation conditions. Existing notes, long-term rules, decisions, and Git state are unchanged. Read-only tasks never run memory maintenance, even when a Hook reports stale state. Explicit maintenance follows the requested scope; seven-day reminders never delete or promote entries.
+
+Routine mechanical edits with no new project fact skip capture instructions and memory scans. Automatic capture and recognized memory-edit Hooks use `maintain-project-state.sh --project-only`, which checks existing project roots and derived output paths before writing, ignores other-project Hook environment overrides, and leaves Claude routing indexes unchanged. Explicit lifecycle maintenance without this flag retains its client-index updates. A rejected or failed automatic refresh reports once without starting Doctor or repair.
+
+Instruction synchronization writes only conditional links to existing supported pipelines. Every target is preflighted before writing; malformed markers cause zero target writes. Managed-region replacement preserves surrounding bytes, LF/CRLF, EOF newline style, ordinary permissions, and resolvable symlinks. Write-phase errors report partial progress; synchronization is not a cross-file transaction.
+
+The shared runtime version stays at `1.4.0`; local Codex builds may append one `+codex.<token>` to the plugin version. Check the final manifest after adding a cachebuster. An existing Doctor marker does not prove a newly installed build has passed behavioral verification.
+
 ## Verification
 
 ```bash
-bash -n .src/scripts/*.sh
+for script in .src/scripts/*.sh; do bash -n "$script" || exit; done
 python3 -m unittest discover -s .src/tests -p 'test_*.py' -v
 python3 /path/to/plugin-creator/scripts/validate_plugin.py .
 python3 /path/to/skill-creator/scripts/quick_validate.py skills/pensieve

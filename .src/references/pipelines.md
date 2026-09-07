@@ -1,84 +1,13 @@
 # Pipelines
 
-A pipeline is responsible for one thing only: clearly defining task sequence, verification loops, and failure fallbacks.
+A pipeline describes a recurring workflow whose order or verification boundaries materially improve execution. Use knowledge for factual maps and decisions for project choices; do not turn every task into a pipeline.
 
-## When to write a pipeline
+Store existing workflows at `<project>/.pensieve/pipelines/run-when-*.md`. Initialization seeds the three supported workflows; project copies remain user data and are not overwritten on upgrades.
 
-Create a new one only when all three conditions are met:
+Use the existing frontmatter fields `id`, `type`, `title`, `status`, `created`, `updated`, `tags`, and `description`; every pipeline needs a relevant `[[...]]` context link. Keep the description short and discriminate execution requests from explanation, review, or planning.
 
-1. The same type of task has already recurred
-2. Step order is non-interchangeable
-3. Each step has a verifiable completion criterion
+Describe the real outcome, necessary ordering, applicable verification, and how to handle unavailable evidence. Number steps only when order matters; choose the number of steps from the task, not a fixed template. Detailed background may be linked on demand instead of loaded before every action.
 
-If the problem is mainly "scattered knowledge" or "unclear boundaries," write a `knowledge/decision` first — do not over-create pipelines.
+Current user intent and authorization control execution. Trigger words are discovery hints, not permission. A workflow must not introduce commits, memory updates, deployments, broad reviews, or new architecture outside the requested scope. Preserve supported compatibility, validation, recovery, and user-visible contracts.
 
-## Storage location
-
-```text
-<project>/.pensieve/pipelines/
-└── run-when-*.md
-```
-
-During initialization or migration, the system seeds default pipelines from `.src/templates/pipelines/`.
-After that, files under `pipelines/` are the user's real data.
-
-## Mandatory rules
-
-- Filename must be `run-when-*.md`
-- Pipeline body should only contain task orchestration, verification loops, and failure fallbacks
-- Any lengthy background, rationale, or constraints should be split into `knowledge/decision/maxim` and linked back
-- Each pipeline must have at least one `[[...]]` context link
-
-## Recommended skeleton
-
-```markdown
-# Pipeline Name
-
----
-id: run-when-xxx
-type: pipeline
-title: Pipeline Name
-status: active
-created: YYYY-MM-DD
-updated: YYYY-MM-DD
-tags: [pensieve, pipeline]
-description: [trigger scenario, cost of skipping, trigger keywords]
----
-
-## Signal Rules
-- Only keep reproducible, locatable, evidence-backed results
-
-## Task Blueprint
-### Task 1
-- Goal
-- Input
-- Execution steps
-- Completion criteria
-
-### Task 2
-...
-
-## Failure Fallback
-1. Stop when input is missing
-2. Filter when evidence is insufficient
-3. Explicitly state when no high-signal results exist
-```
-| Mandatory frontmatter | `id/type/title/status/created/updated/tags/description` |
-| `description` | Located in frontmatter, contains trigger keywords |
-| Signal Rules | Must declare high-signal threshold and non-reportable items |
-| No knowledge stacking | Lengthy background goes into Knowledge/Maxims/Decisions/Skills |
-| Content splitting | If a paragraph does not affect task orchestration, it must be split out and replaced with a `[[...]]` reference |
-| Task Blueprint | Must explicitly use `Task 1/2/3...` ordering |
-| **Goal** | Required for each task |
-| **Input** | Files/paths must be clearly specified |
-| **Execution steps** | Numbered, specific, actionable |
-| **Completion criteria** | Must be verifiable |
-| **CRITICAL** / **DO NOT SKIP** | Strong prompt for critical steps |
-| Failure Fallback | Must have explicit fallback |
-| Links | Body must contain at least one valid link |
-
-## Notes
-
-- Pipelines should be lightweight and executable
-- Each pipeline solves one closed-loop problem only — avoid oversized processes
-- When uncertain, start with a minimal runnable version, then iterate
+Verification should examine observable behavior and evidence. Do not impose arbitrary confidence scores, code-size thresholds, universal prohibitions, or repeated approval gates. Missing optional context should lead to a bounded fallback, not early abandonment of authorized work.

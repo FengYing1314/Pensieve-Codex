@@ -20,7 +20,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Validate shell syntax
-        run: bash -n .src/scripts/*.sh
+        run: for script in .src/scripts/*.sh; do bash -n "$script" || exit; done
       - name: Compile Python sources
         run: python -m compileall -q .src/core .src/scripts .src/tests
       - name: Run behavior parity and safety tests

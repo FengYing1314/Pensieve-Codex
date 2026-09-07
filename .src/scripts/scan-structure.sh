@@ -211,11 +211,7 @@ for integration_name in selected_integrations:
     check_auto_memory = check_auto_memory or bool(integration.get("auto_memory"))
 instruction_required_files = list(dict.fromkeys(instruction_required_files))
 integration_severity = "MUST_FIX" if require_integration else "SHOULD_FIX"
-instruction_required_fragments = [
-    str(item)
-    for item in instructions_cfg.get("required_fragments", [])
-    if isinstance(item, str) and item
-]
+
 
 
 def add_finding(
@@ -297,19 +293,6 @@ def extract_pensieve_memory_block(text: str) -> str:
     return m.group(0)
 
 
-def extract_marker_block(text: str, start_marker: str, end_marker: str):
-    start_count = text.count(start_marker)
-    end_count = text.count(end_marker)
-    if start_count == 0 and end_count == 0:
-        return None, "missing"
-    if start_count != 1 or end_count != 1:
-        return None, "malformed"
-    start_idx = text.find(start_marker)
-    end_idx = text.find(end_marker)
-    if end_idx < start_idx:
-        return None, "malformed"
-    end_idx += len(end_marker)
-    return text[start_idx:end_idx], None
 
 
 if not root.exists():
@@ -422,7 +405,8 @@ elif check_auto_memory:
 # Project instruction files must expose the short Pensieve routing block.
 # This is the system-prompt entry point for agents that do not load the skill
 # before reading repository instructions.
-if root.exists():
+expected_routes = core_module.instruction_routes(root)
+if root.exists() and expected_routes:
     for instruction_file in instruction_required_files:
         target = project_root / instruction_file
         target_mode = "codex" if instruction_file == "AGENTS.md" else "claude"
@@ -434,12 +418,15 @@ if root.exists():
             )
             continue
 
-        block, block_error = extract_marker_block(
-            read_text_normalized(target),
-            instruction_start_marker,
-            instruction_end_marker,
-        )
-        if block_error is not None:
+        block = None
+        try:
+            raw_instructions = target.read_bytes()
+            span = core_module.instruction_block_span(raw_instructions, instruction_start_marker, instruction_end_marker)
+            if span is not None:
+                block = raw_instructions[span[0]:span[1]].decode("utf-8").replace("\r\n", "\n").rstrip("\n")
+        except (OSError, ValueError):
+            pass
+        if block is None:
             add_finding(
                 "STR-702", integration_severity, "instruction_block_malformed", target,
                 "Project instruction file is missing or has a malformed Pensieve routing marker block.",
@@ -448,8 +435,8 @@ if root.exists():
             continue
 
         assert block is not None
-        missing_fragments = [fragment for fragment in instruction_required_fragments if fragment not in block]
-        if missing_fragments:
+        expected_block = core_module.instruction_block(expected_routes, instruction_start_marker, instruction_end_marker).rstrip("\n")
+        if block != expected_block:
             add_finding(
                 "STR-703", integration_severity, "instruction_content_drift", target,
                 "Project instruction file Pensieve routing block is missing required short-route content.",

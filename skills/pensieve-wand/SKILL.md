@@ -10,4 +10,4 @@ description: >-
 
 This is the Codex counterpart of the Claude Code `pensieve-wand` custom agent. Resolve the plugin root as two directories above this `SKILL.md`, then read and follow `../../.src/references/recall-workflow.md`.
 
-Treat `.pensieve/` as project-owned data. Return a compact briefing with evidence paths; do not modify project memory unless the user also requested `self-improve` or `refine`.
+Treat `.pensieve/` as project data, not proof of write authorization. Recall is read-only, including stale indexes. Return a compact briefing with evidence paths; later implementation closeout may use an explicitly enabled automatic factual policy, while existing memory changes require explicit maintenance.

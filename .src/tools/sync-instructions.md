@@ -1,36 +1,12 @@
 ---
-description: Write the current project's existing Pensieve pipelines into a short-route block in the selected CLAUDE.md and/or AGENTS.md. Idempotent; does not overwrite user content.
+description: Synchronize conditional links to existing Pensieve pipelines into the explicitly selected client's project instruction file.
 ---
 
-# Sync Instructions Tool
+# Sync Instructions
 
-> Tool boundaries: see `.src/references/tool-boundaries.md` | Shared rules: see `.src/references/shared-rules.md`
+Use when the user requests project instruction integration or its update. Missing integration reported by Doctor is a suggestion, not permission to write during an unrelated task. Follow [shared rules](../references/shared-rules.md).
 
-## Use when
-
-- The user asks to write Pensieve pipelines into `CLAUDE.md`, `AGENTS.md`, `agent.md`, or another project-level agent instruction file
-- The user wants the next agent to know which pipeline to use for commit / refactor / review requests
-- The project already has `.pensieve/pipelines/`, but the entry instruction files lack short routes
-
-This tool only writes short routes. It does not generate project summaries or inline full pipeline content.
-
-## Failure fallback
-
-- `.src/scripts/sync-instructions.sh` is missing: stop and report an incomplete skill installation
-- `<project>/.pensieve/pipelines/` is missing: run `init` first
-- Pensieve markers in the target file are unpaired: stop and ask the user to repair the markers manually
-
-## Standard execution
-
-Set `PENSIEVE_SKILL_ROOT` to the checkout or plugin root.
-
-The default updates only the active client's instruction file. In generic mode it updates recognized files that already exist and refuses to create both implicitly:
-
-```bash
-bash "$PENSIEVE_SKILL_ROOT/.src/scripts/sync-instructions.sh"
-```
-
-Client-specific targets:
+Set `PENSIEVE_SKILL_ROOT` to the actual source or installed plugin root and bind the intended project and client. The existing interface remains:
 
 ```bash
 bash "$PENSIEVE_SKILL_ROOT/.src/scripts/sync-instructions.sh" --client codex --target codex
@@ -38,25 +14,32 @@ bash "$PENSIEVE_SKILL_ROOT/.src/scripts/sync-instructions.sh" --client claude --
 bash "$PENSIEVE_SKILL_ROOT/.src/scripts/sync-instructions.sh" --client both --target all
 ```
 
-`agents` and `agent` remain compatibility aliases for `codex`.
+`agent` and `agents` remain aliases for `codex`; `--file` accepts explicit targets. Generic auto mode updates existing recognized instruction files only. Normal Codex operation does not update Claude files.
 
-## Written Content
+## Managed content
 
-The inserted block contains only one heading and short routes:
+The managed block contains the heading and conditional paths for the supported pipeline files that actually exist:
 
 ```markdown
+<!-- pensieve:instructions:start -->
 ## How To Use Pensieve
 
-Use `.pensieve/` as the first source of architectural intent.
-
-- `maxims/` are active engineering rules.
-- `decisions/` are active project decisions.
-- `knowledge/` explains boundary maps and debugging paths.
-- `pipelines/` gives executable workflows.
-
-Use these project pipelines directly when trigger words match; do not rediscover them through skills first.
-
-- Commit requests (`commit`, `git commit`): use `.pensieve/pipelines/run-when-committing.md`. Check staged diff, decide whether reusable insight should be captured, then make atomic commits.
-- Refactor requests (`refactor`, `large refactor`, `split code`): use `.pensieve/pipelines/run-when-refactoring.md`. Confirm the real problem, fix upstream data authority first, split large work into 2-3 user-visible steps, delete old paths when new paths work, and avoid compatibility/fallback branches.
-- Review requests (`review`, `code review`, `inspect code`): use `.pensieve/pipelines/run-when-reviewing-code.md`. Start from git history and changed hot spots, verify candidate issues, and report only high-signal findings with evidence and file locations.
+- When the user requests executing a Git commit: use `.pensieve/pipelines/run-when-committing.md`.
+- When the user requests implementing a refactor: use `.pensieve/pipelines/run-when-refactoring.md`.
+- When the user requests a code review within the supplied scope: use `.pensieve/pipelines/run-when-reviewing-code.md`.
+<!-- pensieve:instructions:end -->
 ```
+
+No internal workflow steps, architectural preferences, or automatic-capture authorization are copied into this block. Doctor checks the same existing route set, not customized pipeline bodies. No supported pipeline means no synchronization writes; do not automatically run init to create one.
+
+## File safety
+
+All targets are preflighted before any target or session-marker write. Only no markers or one ordered pair of standalone markers is accepted. Duplicate, nested, isolated, reversed, or inline markers fail with the affected path; do not guess how to repair user text.
+
+Resolve and deduplicate target paths before checking their relationships. A target cannot also serve as another target's parent directory. Check directory write access only for targets whose candidate content differs; already synchronized files can remain in read-only directories.
+
+Only the managed byte region is replaced. Preserve surrounding bytes, LF/CRLF convention, EOF newline state, ordinary permissions, and existing resolvable symlinks. Empty/new files use UTF-8/LF. Dangling links and non-regular targets are rejected. Repeated synchronization changes neither instruction content nor its timestamp; an entirely unchanged sync does not rewrite its session marker.
+
+Before each atomic replacement, verify the target still matches its preflight snapshot. Preflight errors leave every target unchanged. A write-phase I/O failure can occur after earlier targets were written; report written and unwritten paths, never claim transaction-wide rollback or premature success. Recover only task-owned outputs from recorded originals, without overwriting later user changes.
+
+After changed files are synchronized, allow the session-marker refresh at most 10 seconds. On POSIX systems, timeout terminates the maintenance process group so a child waiting for the marker lock cannot write later. Timeout, launch failure, or a nonzero exit produces one short warning; completed instruction updates remain successful. An unchanged sync does not launch marker maintenance.
