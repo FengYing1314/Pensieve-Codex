@@ -19,18 +19,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Validate shell syntax
-        run: for script in .src/scripts/*.sh; do bash -n "$script" || exit; done
-      - name: Compile Python sources
-        run: python -m compileall -q .src/core .src/scripts .src/tests
-      - name: Run behavior parity and safety tests
+      - name: Run repository checks
         env:
           PENSIEVE_TEST_TMPDIR: ${{ runner.temp }}
-        run: python -m unittest discover -s .src/tests -p 'test_*.py' -v
-      - name: Check JSON manifests
-        run: |
-          python -m json.tool .codex-plugin/plugin.json >/dev/null
-          python -m json.tool hooks/hooks.json >/dev/null
-          python -m json.tool .src/core/schema.json >/dev/null
-      - name: Check whitespace errors
-        run: git diff --check
+          PYTHON_BIN: python
+        run: bash .src/scripts/check-repository.sh

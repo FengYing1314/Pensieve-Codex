@@ -6,23 +6,19 @@
   "critical_files": [
     {
       "target": "pipelines/run-when-reviewing-code.md",
-      "template": ".src/templates/pipelines/run-when-reviewing-code.md",
-      "compare_mode": "pipeline_context_links_ignored"
+      "template": ".src/templates/pipelines/run-when-reviewing-code.md"
     },
     {
       "target": "pipelines/run-when-committing.md",
-      "template": ".src/templates/pipelines/run-when-committing.md",
-      "compare_mode": "pipeline_context_links_ignored"
+      "template": ".src/templates/pipelines/run-when-committing.md"
     },
     {
       "target": "pipelines/run-when-refactoring.md",
-      "template": ".src/templates/pipelines/run-when-refactoring.md",
-      "compare_mode": "pipeline_context_links_ignored"
+      "template": ".src/templates/pipelines/run-when-refactoring.md"
     },
     {
       "target": "knowledge/taste-review/content.md",
-      "template": ".src/templates/knowledge/taste-review/content.md",
-      "compare_mode": "exact"
+      "template": ".src/templates/knowledge/taste-review/content.md"
     }
   ],
   "legacy_paths": {

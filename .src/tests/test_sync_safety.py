@@ -8,8 +8,7 @@ import subprocess
 import sys
 from unittest.mock import MagicMock, patch
 
-from test_pensieve import PensieveTestCase, SCRIPTS_ROOT, tree_snapshot, write_text
-import pensieve_core
+from support import PensieveTestCase, SCRIPTS_ROOT, pensieve_core, tree_snapshot, write_text
 
 
 class SyncSafetyTests(PensieveTestCase):

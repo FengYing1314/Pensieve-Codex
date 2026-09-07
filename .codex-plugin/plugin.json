@@ -1,13 +1,13 @@
 {
   "name": "pensieve",
-  "version": "1.4.0+codex.20260907222457",
+  "version": "1.4.0+codex.20260907225645",
   "description": "Project knowledge, decisions, maxims, and reusable workflow routing for Codex and Claude Code.",
   "author": {
     "name": "FengYing1314",
     "url": "https://github.com/FengYing1314"
   },
-  "homepage": "https://github.com/FengYing1314/Pensieve",
-  "repository": "https://github.com/FengYing1314/Pensieve",
+  "homepage": "https://github.com/FengYing1314/Pensieve-Codex",
+  "repository": "https://github.com/FengYing1314/Pensieve-Codex",
   "license": "MIT",
   "keywords": [
     "knowledge",

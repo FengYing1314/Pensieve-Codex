@@ -5,7 +5,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from test_pensieve import PensieveTestCase, REPO_ROOT, tree_snapshot, write_text
+from support import PensieveTestCase, REPO_ROOT, tree_snapshot, write_text
 
 
 class AutomaticRefreshBoundaryTests(PensieveTestCase):

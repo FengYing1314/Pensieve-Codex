@@ -6,7 +6,7 @@ import subprocess
 import time
 from unittest.mock import patch
 
-from test_pensieve import PensieveTestCase, SCRIPTS_ROOT, write_text
+from support import PensieveTestCase, SCRIPTS_ROOT, write_text
 
 
 HOOK_SPEC = importlib.util.spec_from_file_location("pensieve_timeout_hook", SCRIPTS_ROOT / "run-client-hook.py")

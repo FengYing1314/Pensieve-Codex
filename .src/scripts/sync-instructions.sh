@@ -6,8 +6,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
-START_MARKER="<!-- pensieve:instructions:start -->"
-END_MARKER="<!-- pensieve:instructions:end -->"
 TARGET_MODE="auto"
 CUSTOM_TARGETS=()
 CLIENT_REQUEST="${PENSIEVE_CLIENT:-auto}"

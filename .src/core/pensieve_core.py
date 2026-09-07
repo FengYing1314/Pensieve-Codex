@@ -126,42 +126,6 @@ def classify_state(
 
 
 # ---------------------------------------------------------------------------
-# Shared normalization for critical file comparison (used by scan-structure
-# and run-migrate to ignore context-link value differences).
-# ---------------------------------------------------------------------------
-
-_CONTEXT_LINK_LINE_RE = re.compile(
-    r"^(\s*-\s*(?:基于|导致|相关|[Bb]ased[ -]on|[Ll]eads[ -]to|[Rr]elated)[:：])\s*.*$"
-)
-
-_PIPELINE_BASENAMES = frozenset({
-    "run-when-reviewing-code.md",
-    "run-when-committing.md",
-    "run-when-refactoring.md",
-})
-
-
-def normalize_context_link_line(line: str) -> str:
-    """Replace the value portion of a context-link line with a placeholder."""
-    m = _CONTEXT_LINK_LINE_RE.match(line)
-    if not m:
-        return line.rstrip()
-    return f"{m.group(1)} <context-value>"
-
-
-def normalize_critical_file_content(basename: str, text: str) -> str:
-    """Normalize a critical file's content for comparison.
-
-    For pipeline files, context-link values are replaced with placeholders so
-    that trivial link-target differences do not trigger drift detection.
-    """
-    if basename in _PIPELINE_BASENAMES:
-        lines = [normalize_context_link_line(line) for line in text.split("\n")]
-        return "\n".join(lines).rstrip() + "\n"
-    return text
-
-
-# ---------------------------------------------------------------------------
 # SKILL.md frontmatter description extraction (used by scan-structure and
 # maintain-auto-memory to read the skill description from SKILL.md).
 # ---------------------------------------------------------------------------

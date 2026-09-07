@@ -4,12 +4,14 @@
 
 **A project knowledge base and workflow router for Codex, Claude Code, and skill-capable agents.**
 
-[![GitHub Stars](https://img.shields.io/github/stars/kingkongshot/Pensieve?color=ffcb47&labelColor=black&style=flat-square)](https://github.com/kingkongshot/Pensieve/stargazers)
+[![GitHub Stars](https://img.shields.io/github/stars/FengYing1314/Pensieve-Codex?color=ffcb47&labelColor=black&style=flat-square)](https://github.com/FengYing1314/Pensieve-Codex/stargazers)
 [![License](https://img.shields.io/badge/license-MIT-white?labelColor=black&style=flat-square)](LICENSE)
 
-[中文 README](https://github.com/kingkongshot/Pensieve/blob/zh/README.md)
+[Upstream project](https://github.com/kingkongshot/Pensieve) · [Upstream 中文 README](https://github.com/kingkongshot/Pensieve/blob/zh/README.md)
 
 </div>
+
+This repository maintains the Codex plugin and shared Claude Code runtime derived from the upstream Pensieve project. The upstream Chinese documentation describes its own release; use the installation instructions below for this repository.
 
 Pensieve keeps project-owned memory in `.pensieve/` and loads only the relevant parts for a task. Knowledge, settled decisions, engineering maxims, reusable pipelines, and short-term conclusions remain independent of the client that uses them.
 
@@ -34,6 +36,8 @@ Pensieve keeps project-owned memory in `.pensieve/` and loads only the relevant 
 | `short-term/` | STAGING | Which new conclusions still need triage? |
 
 Entries can link through `based-on`, `leads-to`, and `related`. Pensieve generates a project graph without copying the full graph into model context.
+
+Example knowledge graphs:
 
 <img src="docs/graph-overview.png" width="100%" alt="Pensieve knowledge graph overview" />
 <img src="docs/graph-detail.png" width="100%" alt="Pensieve knowledge graph detail" />
@@ -75,13 +79,13 @@ Prerequisites: `git`, `bash`, and Python 3.8+.
 
 ### Codex native plugin
 
-Clone this branch as the source checkout used by a personal marketplace:
+Clone the maintained `main` branch as the source checkout used by a personal marketplace:
 
 ```bash
-git clone -b feat/codex-native-plugin https://github.com/FengYing1314/Pensieve.git "$HOME/plugins/pensieve"
+git clone -b main https://github.com/FengYing1314/Pensieve-Codex.git "$HOME/plugins/pensieve"
 ```
 
-Add this entry to `~/.agents/plugins/marketplace.json` while preserving any existing entries:
+Register the existing checkout in your personal marketplace, preserving all existing entries. The default layout uses `~/.agents/plugins/marketplace.json` with the following entry; treat this as a format example, not a replacement for an existing marketplace file:
 
 ```json
 {
@@ -120,7 +124,7 @@ PENSIEVE_CLIENT=codex PENSIEVE_SKILL_ROOT="$HOME/plugins/pensieve" \
 The root Skill entry and historical Hook script paths remain compatible. The installer uses Claude's native `SubagentStart`; rerunning it removes only legacy Pensieve `PreToolUse Agent` entries and preserves unrelated hooks:
 
 ```bash
-git clone -b feat/codex-native-plugin https://github.com/FengYing1314/Pensieve.git "$HOME/.claude/skills/pensieve"
+git clone -b main https://github.com/FengYing1314/Pensieve-Codex.git "$HOME/.claude/skills/pensieve"
 bash "$HOME/.claude/skills/pensieve/.src/scripts/install-hooks.sh"
 
 cd <your-project>
@@ -227,16 +231,15 @@ The shared runtime version stays at `1.4.0`; local Codex builds may append one `
 
 ## Verification
 
+Run the same repository checks used by CI:
+
 ```bash
-for script in .src/scripts/*.sh; do bash -n "$script" || exit; done
-python3 -m unittest discover -s .src/tests -p 'test_*.py' -v
-python3 /path/to/plugin-creator/scripts/validate_plugin.py .
-python3 /path/to/skill-creator/scripts/quick_validate.py skills/pensieve
-python3 /path/to/skill-creator/scripts/quick_validate.py skills/pensieve-wand
-git diff --check
+bash .src/scripts/check-repository.sh
 ```
 
-The test suite uses only the Python standard library and replays paired Claude/Codex Hook fixtures. A live Claude Code binary is not required for contract testing.
+The script checks every Shell script, compiles Python into a temporary directory, runs the standard-library tests, validates the JSON manifests and schema, and checks the diff. Set `PYTHON_BIN` to an existing interpreter when testing another supported version. A live Claude Code binary is not required for contract tests.
+
+See [Maintaining this repository](docs/maintaining.md) for the test layout, optional official plugin/skill validators, local build refresh, and release checks. See [CHANGELOG.md](CHANGELOG.md) for current changes and archived upstream history.
 
 ## License
 

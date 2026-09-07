@@ -250,14 +250,6 @@ def read_text_normalized(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n")
 
 
-def normalize_context_link_line(line: str) -> str:
-    return core_module.normalize_context_link_line(line)
-
-
-def normalize_critical_file_content(path: Path, text: str) -> str:
-    return core_module.normalize_critical_file_content(path.name, text)
-
-
 def has_memory_guidance(block: str) -> bool:
     for raw_line in block.splitlines():
         line = raw_line.strip()
